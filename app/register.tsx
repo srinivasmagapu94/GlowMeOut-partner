@@ -1,5 +1,6 @@
-import { View, Text, StyleSheet, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { Image } from 'expo-image';
+import * as DocumentPicker from 'expo-document-picker';
 import { Feather } from '@expo/vector-icons';
 import { useState } from 'react';
 import { useRouter } from 'expo-router';
@@ -33,7 +34,9 @@ export default function PartnerRegister() {
   const [certDraft, setCertDraft] = useState({ name: '', institute: '', issue_date: '', comment: '' });
   // step 4
   const [kycType, setKycType] = useState<'aadhaar' | 'pan'>('aadhaar');
-  const [kycNumber, setKycNumber] = useState('');
+  const [kycNumber, setKycNumber] = useState('123456');
+  const [kycDocument, setKycDocument] = useState<{ name: string; uri: string; type?: string } | null>(null);
+  const [certificateFile, setCertificateFile] = useState<{ name: string; uri: string; type?: string } | null>(null);
   // step 5
   const [bankName, setBankName] = useState('');
   const [accountHolder, setAccountHolder] = useState('');
@@ -52,10 +55,66 @@ export default function PartnerRegister() {
 
   const toggleService = (id: string) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
-  const addCert = () => {
-    if (!certDraft.name.trim()) return;
-    setCerts([...certs, certDraft]);
-    setCertDraft({ name: '', institute: '', issue_date: '', comment: '' });
+  const addCert = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg'],
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+
+      if (result.canceled || !result.assets?.length) return;
+
+      const asset = result.assets[0];
+      const partnerUUID = await loadPartnerProfileId();
+      if (!partnerUUID) {
+        Alert.alert('Profile not saved', 'Please save personal details before uploading a certificate.');
+        return;
+      }
+
+      const formData = new FormData();
+
+      if (Platform.OS === 'web') {
+        const blobResponse = await fetch(asset.uri);
+        const blob = await blobResponse.blob();
+        const file = new File([blob], asset.name || 'certificate.pdf', {
+          type: asset.mimeType || 'application/pdf',
+        });
+        formData.append('certificate', file);
+      } else {
+        formData.append('certificate', {
+          uri: asset.uri,
+          name: asset.name || 'certificate.pdf',
+          type: asset.mimeType || 'application/pdf',
+        } as any);
+      }
+
+      const response = await fetch(`${BASE}/${partnerUUID}/uploadCertificate`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (response.status !== 200) {
+        const errText = await response.text();
+        Alert.alert('Certificate upload failed', errText || 'Please try again.');
+        return;
+      }
+
+      setCertificateFile({
+        name: asset.name || 'certificate',
+        uri: asset.uri,
+        type: asset.mimeType || 'application/pdf',
+      });
+      setCerts(prev => [...prev, {
+        name: asset.name || 'Certificate',
+        institute: 'Uploaded',
+        issue_date: new Date().toISOString().slice(0, 10),
+        comment: 'Uploaded by partner',
+      }]);
+      Alert.alert('Success', 'Certificate uploaded successfully.');
+    } catch (error: any) {
+      Alert.alert('Upload error', error?.message || 'Unable to upload certificate.');
+    }
   };
 
   const createProfile = async () => {
@@ -108,6 +167,109 @@ export default function PartnerRegister() {
     }
   };
 
+  const uploadKYC = async () => {
+    const partnerUUID = await loadPartnerProfileId();
+    if (!partnerUUID) {
+      Alert.alert('Profile not saved', 'Please save personal details before uploading KYC document.');
+      return;
+    }
+
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg'],
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+
+      if (result.canceled || !result.assets?.length) return;
+
+      const asset = result.assets[0];
+      const formData = new FormData();
+
+      if (Platform.OS === 'web') {
+        const blobResponse = await fetch(asset.uri);
+        const blob = await blobResponse.blob();
+        const file = new File([blob], asset.name || 'kyc-document.pdf', {
+          type: asset.mimeType || 'application/pdf',
+        });
+        formData.append('KYCDocument', file);
+      } else {
+        formData.append('KYCDocument', {
+          uri: asset.uri,
+          name: asset.name || 'kyc-document.pdf',
+          type: asset.mimeType || 'application/pdf',
+        } as any);
+      }
+
+      const response = await fetch(`${BASE}/${partnerUUID}/uploadKYC`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (response.status !== 200) {
+        const errText = await response.text();
+        Alert.alert('KYC document upload failed', errText || 'Please try again.');
+        return;
+      }
+
+      setKycDocument({
+        name: asset.name || 'kyc-document.pdf',
+        uri: asset.uri,
+        type: asset.mimeType || 'application/pdf',
+      });
+      Alert.alert('Success', 'KYC document uploaded successfully.');
+    } catch (error: any) {
+      Alert.alert('Upload error', error?.message || 'Unable to upload KYC document.');
+    }
+  };
+
+  const createKYC = async () => {
+    const partnerUUID = await loadPartnerProfileId();
+    if (!partnerUUID) throw new Error('Partner profile ID not found.');
+
+    const payload = {
+      partnerUUID,
+      aadhaarNumber: kycType === 'aadhaar' ? kycNumber : null,
+      panNumber: kycType === 'pan' ? kycNumber : null,
+    };
+
+    const res = await fetch(`${BASE}/createPartnerKYC`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (res.status !== 201) {
+      const text = await res.text();
+      throw new Error(text || 'KYC save failed');
+    }
+  };
+
+  const createBankDetails = async () => {
+    const partnerUUID = await loadPartnerProfileId();
+    if (!partnerUUID) throw new Error('Partner profile ID not found.');
+
+    const payload = {
+      partnerUUID,
+      bankName,
+      accountHolderName: accountHolder,
+      ifscCode: ifsc,
+      accountNumber,
+      confirmAccountNumber: confirmAccount,
+    };
+
+    const res = await fetch(`${BASE}/createPartnerBankDetails`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (res.status !== 201) {
+      const text = await res.text();
+      throw new Error(text || 'Bank details save failed');
+    }
+  };
+
   const submit = async () => {
     try {
       setSaving(true);
@@ -152,6 +314,34 @@ export default function PartnerRegister() {
       } catch (e: any) {
         console.error(e);
         alert(e.message || 'Unable to save services');
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
+    if (step === 3) {
+      try {
+        setSaving(true);
+        await createKYC();
+        setStep(4);
+      } catch (e: any) {
+        console.error(e);
+        alert(e.message || 'Unable to save KYC');
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
+    if (step === 4) {
+      try {
+        setSaving(true);
+        await createBankDetails();
+        setStep(5);
+      } catch (e: any) {
+        console.error(e);
+        alert(e.message || 'Unable to save bank details');
       } finally {
         setSaving(false);
       }
@@ -262,11 +452,11 @@ export default function PartnerRegister() {
                 kb={kycType === 'aadhaar' ? 'number-pad' : 'default'}
                 testID="kyc-number"
               />
-              <View style={styles.upload}>
+              <Pressable style={styles.upload} onPress={uploadKYC}>
                 <Feather name="upload-cloud" size={22} color={pColors.goldDeep} />
                 <Text style={styles.uploadTitle}>Upload {kycType === 'aadhaar' ? 'Aadhaar' : 'PAN'} document</Text>
-                <Text style={styles.uploadSub}>PDF or image, up to 5 MB (mocked)</Text>
-              </View>
+                <Text style={styles.uploadSub}>{kycDocument ? kycDocument.name : 'PDF or image, up to 5 MB'}</Text>
+              </Pressable>
             </View>
           )}
 
@@ -336,7 +526,10 @@ function Field({ label, value, onChange, multi, kb, maxLen, testID }: any) {
         keyboardType={kb || 'default'}
         maxLength={maxLen}
         placeholderTextColor={pColors.inkFaint}
-        selectionColor={pColors.goldDeep}
+        selectionColor="transparent"
+        underlineColorAndroid="transparent"
+        cursorColor={pColors.goldDeep}
+        selectTextOnFocus={false}
         style={[styles.input, multi && { minHeight: 80, textAlignVertical: 'top', paddingTop: 12 }]}
       />
     </View>
@@ -370,7 +563,7 @@ const styles = StyleSheet.create({
   avatarBtn: { flexDirection: 'row', gap: 6, alignItems: 'center', marginTop: pSpacing.md, paddingHorizontal: 12, paddingVertical: 8, borderRadius: pRadii.pill, backgroundColor: pColors.surface, borderWidth: 1, borderColor: pColors.border },
   avatarBtnTxt: { color: pColors.ink, fontSize: 12, fontWeight: '600' },
   label: { color: pColors.inkMuted, fontSize: 10, letterSpacing: 1.5, fontWeight: '700' },
-  input: { marginTop: 6, backgroundColor: pColors.surface, borderWidth: 1, borderColor: pColors.border, borderRadius: pRadii.md, paddingHorizontal: pSpacing.lg, height: 52, fontSize: 15, color: pColors.ink, outline: 'none', shadowOpacity: 0, shadowColor: 'transparent', elevation: 0 },
+  input: { marginTop: 6, backgroundColor: pColors.surface, borderWidth: 1, borderColor: pColors.border, borderRadius: pRadii.md, paddingHorizontal: pSpacing.lg, height: 52, fontSize: 15, color: pColors.ink, outline: 'none', shadowOpacity: 0, shadowColor: 'transparent', elevation: 0, textDecorationLine: 'none' },
   err: { color: pColors.error, fontSize: 12 },
   services: { gap: pSpacing.sm },
   svcTile: { flexDirection: 'row', gap: pSpacing.md, alignItems: 'center', backgroundColor: pColors.surface, borderWidth: 1, borderColor: pColors.border, borderRadius: pRadii.md, paddingHorizontal: pSpacing.lg, paddingVertical: 14 },

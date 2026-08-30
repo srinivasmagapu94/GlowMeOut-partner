@@ -76,7 +76,7 @@ export default function PartnerOtp() {
         <Pressable onPress={() => router.back()} style={styles.back}><Feather name="arrow-left" size={22} color={pColors.ink} /></Pressable>
         <View style={{ paddingHorizontal: pSpacing.xl }}>
           <Text style={styles.h1}>Verify OTP</Text>
-          <Text style={styles.sub}>We sent a 6-digit code to <Text style={{ fontWeight: '700' }}>{normalizedPhone || phone}</Text>. Use <Text style={{ color: pColors.goldDeep, fontWeight: '700' }}>123456</Text> for demo.</Text>
+          <Text style={styles.sub}>We sent a 6-digit code to <Text style={{ fontWeight: '700' }}>{normalizedPhone || phone}</Text></Text>.
           <View style={styles.row}>
             {digits.map((d, i) => (
               <TextInput
