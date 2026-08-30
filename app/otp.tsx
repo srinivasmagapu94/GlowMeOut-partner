@@ -1,13 +1,16 @@
-import { View, Text, StyleSheet, TextInput, Pressable, KeyboardAvoidingView, Platform } from 'react-native';
+﻿import { View, Text, StyleSheet, TextInput, Pressable, KeyboardAvoidingView, Platform } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { pColors, pRadii, pSpacing, pType } from '@/src/theme';
-import { partnerApi, savePartnerSession } from '@/src/api';
+import { normalizePartnerMobileNumber } from '@/src/api';
+
+const BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 export default function PartnerOtp() {
   const { phone } = useLocalSearchParams<{ phone: string }>();
+  const normalizedPhone = normalizePartnerMobileNumber(Array.isArray(phone) ? phone[0] : phone || '');
   const router = useRouter();
   const [digits, setDigits] = useState(['', '', '', '', '', '']);
   const refs = useRef<Array<TextInput | null>>([]);
@@ -33,20 +36,38 @@ export default function PartnerOtp() {
     if (otp.length !== 6) return setErr('Enter the 6-digit code');
     try {
       setLoading(true);
-      const res = await partnerApi('/partner/auth/otp/verify', { method: 'POST', body: JSON.stringify({ phone, otp }) });
-      await savePartnerSession(res.token, res.user);
-      const status = res.user.artist_status || 'unregistered';
-      if (status === 'unregistered') router.replace('/register');
-      else if (status === 'pending_verification' || status === 'rejected') router.replace('/verification-pending');
-      else router.replace('/(tabs)/dashboard');
-    } catch { setErr('Invalid code. Use 123456 for demo.'); }
-    finally { setLoading(false); }
+      const res = await fetch(`${BASE}/partner/verifyOTP`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mobileNumber: normalizedPhone, otp }),
+      });
+
+      // Temporarily disabled token/session saving.
+      // const response = await res.json();
+      // await savePartnerSession(response.token, response.user);
+
+      if (res.status === 200) {
+        router.replace('/register');
+        return;
+      }
+
+      const text = await res.text();
+      throw new Error(text || 'Invalid OTP');
+    } catch (e: any) {
+      setErr(e.message || 'Invalid code.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const resend = async () => {
     if (seconds > 0) return;
     setSeconds(30);
-    await partnerApi('/partner/auth/otp/request', { method: 'POST', body: JSON.stringify({ phone }) });
+    await fetch(`${BASE}/partner/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mobileNumber: normalizedPhone }),
+    });
   };
 
   return (
@@ -55,7 +76,7 @@ export default function PartnerOtp() {
         <Pressable onPress={() => router.back()} style={styles.back}><Feather name="arrow-left" size={22} color={pColors.ink} /></Pressable>
         <View style={{ paddingHorizontal: pSpacing.xl }}>
           <Text style={styles.h1}>Verify OTP</Text>
-          <Text style={styles.sub}>We sent a 6-digit code to <Text style={{ fontWeight: '700' }}>{phone}</Text>. Use <Text style={{ color: pColors.goldDeep, fontWeight: '700' }}>123456</Text> for demo.</Text>
+          <Text style={styles.sub}>We sent a 6-digit code to <Text style={{ fontWeight: '700' }}>{normalizedPhone || phone}</Text>. Use <Text style={{ color: pColors.goldDeep, fontWeight: '700' }}>123456</Text> for demo.</Text>
           <View style={styles.row}>
             {digits.map((d, i) => (
               <TextInput

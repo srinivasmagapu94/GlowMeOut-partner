@@ -14,10 +14,6 @@ from datetime import datetime, timezone, timedelta
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
-
 JWT_SECRET = os.environ.get('JWT_SECRET', 'change-me')
 JWT_ALGO = os.environ.get('JWT_ALGO', 'HS256')
 DEMO_OTP = os.environ.get('DEMO_OTP', '123456')

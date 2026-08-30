@@ -5,7 +5,9 @@ import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { pColors, pRadii, pSpacing, pType, SERVICE_CATALOG } from '@/src/theme';
-import { partnerApi, updatePartnerUser } from '@/src/api';
+import { loadPartnerPhone, loadPartnerProfileId, partnerApi, savePartnerProfileId, updatePartnerUser } from '@/src/api';
+
+const BASE = 'http://localhost:8080/ws_glowmeout_partner_services/partner';
 
 const SAMPLE_AVATAR = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&q=80';
 
@@ -56,6 +58,56 @@ export default function PartnerRegister() {
     setCertDraft({ name: '', institute: '', issue_date: '', comment: '' });
   };
 
+  const createProfile = async () => {
+    const phone = await loadPartnerPhone();
+    if (!phone) throw new Error('Mobile number not found. Please log in again.');
+
+    const res = await fetch(`${BASE}/createProfile`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fullName,
+        emailAddress: email,
+        fullAddress: address,
+        city,
+        state: stateName,
+        pinCode: pincode,
+        mobileNumber: phone,
+      }),
+    });
+
+    if (res.status !== 201) {
+      const text = await res.text();
+      throw new Error(text || 'Profile creation failed');
+    }
+
+    const partnerUuid = await res.text();
+    const cleanedUuid = partnerUuid.replace(/^"|"$/g, '').trim();
+    if (cleanedUuid) await savePartnerProfileId(cleanedUuid);
+    return cleanedUuid;
+  };
+
+  const createServices = async () => {
+    const partnerUUID = await loadPartnerProfileId();
+    if (!partnerUUID) throw new Error('Partner profile ID not found.');
+
+    const res = await fetch(`${BASE}/createServices`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        partnerUUID,
+        serviceTypes: selected.map((id) => ({
+          serviceType: id,
+        })),
+      }),
+    });
+
+    if (res.status !== 201) {
+      const text = await res.text();
+      throw new Error(text || 'Service save failed');
+    }
+  };
+
   const submit = async () => {
     try {
       setSaving(true);
@@ -77,10 +129,47 @@ export default function PartnerRegister() {
     } finally { setSaving(false); }
   };
 
+  const handlePrimaryAction = async () => {
+    if (step === 0) {
+      try {
+        setSaving(true);
+        await createProfile();
+        setStep(1);
+      } catch (e: any) {
+        console.error(e);
+        alert(e.message || 'Unable to save profile');
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
+    if (step === 1) {
+      try {
+        setSaving(true);
+        await createServices();
+        setStep(2);
+      } catch (e: any) {
+        console.error(e);
+        alert(e.message || 'Unable to save services');
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
+    if (step === STEPS.length - 1) {
+      await submit();
+      return;
+    }
+
+    setStep(step + 1);
+  };
+
   return (
     <SafeAreaView style={styles.c} testID="partner-register">
       <View style={styles.header}>
-        <Pressable onPress={() => (step === 0 ? router.back() : setStep(step - 1))} style={styles.back}><Feather name="arrow-left" size={22} color={pColors.ink} /></Pressable>
+        {step > 0 ? <Pressable onPress={() => setStep(step - 1)} style={styles.back}><Feather name="arrow-left" size={22} color={pColors.ink} /></Pressable> : <View style={{ width: 40 }} />}
         <View style={{ alignItems: 'center' }}>
           <Text style={styles.step}>STEP {step + 1} / {STEPS.length}</Text>
           <Text style={styles.hTitle}>{STEPS[step]}</Text>
@@ -130,7 +219,19 @@ export default function PartnerRegister() {
 
           {step === 2 && (
             <View style={{ gap: pSpacing.md }}>
-              <Text style={styles.helper}>Optional. Add certificates or awards to build customer trust.</Text>
+              <Text style={styles.helper}>Add your certificate document to complete this step.</Text>
+
+              <Pressable style={styles.upload}>
+                <Feather name="upload-cloud" size={22} color={pColors.goldDeep} />
+                <Text style={styles.uploadTitle}>Upload certificate</Text>
+                <Text style={styles.uploadSub}>PDF or image, up to 5 MB</Text>
+              </Pressable>
+
+              <Pressable style={styles.smallBtn} onPress={addCert}>
+                <Feather name="plus" size={14} color={pColors.ink} />
+                <Text style={styles.smallBtnTxt}>Add certificate</Text>
+              </Pressable>
+
               {certs.map((c, i) => (
                 <View key={i} style={styles.certCard}>
                   <Feather name="award" size={18} color={pColors.goldDeep} />
@@ -141,13 +242,6 @@ export default function PartnerRegister() {
                   <Pressable onPress={() => setCerts(certs.filter((_, x) => x !== i))}><Feather name="x" size={16} color={pColors.inkMuted} /></Pressable>
                 </View>
               ))}
-              <View style={styles.certForm}>
-                <Field label="Certificate name" value={certDraft.name} onChange={(v: string) => setCertDraft({ ...certDraft, name: v })} />
-                <Field label="Institute" value={certDraft.institute} onChange={(v: string) => setCertDraft({ ...certDraft, institute: v })} />
-                <Field label="Issue date (e.g. Aug 2023)" value={certDraft.issue_date} onChange={(v: string) => setCertDraft({ ...certDraft, issue_date: v })} />
-                <Field label="Comment" value={certDraft.comment} onChange={(v: string) => setCertDraft({ ...certDraft, comment: v })} multi />
-                <Pressable style={styles.smallBtn} onPress={addCert}><Feather name="plus" size={14} color={pColors.ink} /><Text style={styles.smallBtnTxt}>Add certificate</Text></Pressable>
-              </View>
             </View>
           )}
 
@@ -219,10 +313,10 @@ export default function PartnerRegister() {
           <Pressable
             style={[styles.cta, (!canNext() || saving) && { opacity: 0.5 }]}
             disabled={!canNext() || saving}
-            onPress={() => (step === STEPS.length - 1 ? submit() : setStep(step + 1))}
+            onPress={handlePrimaryAction}
             testID="reg-next"
           >
-            <Text style={styles.ctaTxt}>{step === STEPS.length - 1 ? (saving ? 'Submitting…' : 'Submit for verification') : 'Continue'}</Text>
+            <Text style={styles.ctaTxt}>{step === STEPS.length - 1 ? (saving ? 'Submitting…' : 'Submit for verification') : (saving ? 'Saving…' : 'Save & continue')}</Text>
           </Pressable>
         </View>
       </KeyboardAvoidingView>
@@ -242,6 +336,7 @@ function Field({ label, value, onChange, multi, kb, maxLen, testID }: any) {
         keyboardType={kb || 'default'}
         maxLength={maxLen}
         placeholderTextColor={pColors.inkFaint}
+        selectionColor={pColors.goldDeep}
         style={[styles.input, multi && { minHeight: 80, textAlignVertical: 'top', paddingTop: 12 }]}
       />
     </View>
@@ -275,7 +370,7 @@ const styles = StyleSheet.create({
   avatarBtn: { flexDirection: 'row', gap: 6, alignItems: 'center', marginTop: pSpacing.md, paddingHorizontal: 12, paddingVertical: 8, borderRadius: pRadii.pill, backgroundColor: pColors.surface, borderWidth: 1, borderColor: pColors.border },
   avatarBtnTxt: { color: pColors.ink, fontSize: 12, fontWeight: '600' },
   label: { color: pColors.inkMuted, fontSize: 10, letterSpacing: 1.5, fontWeight: '700' },
-  input: { marginTop: 6, backgroundColor: pColors.surface, borderWidth: 1, borderColor: pColors.border, borderRadius: pRadii.md, paddingHorizontal: pSpacing.lg, height: 52, fontSize: 15, color: pColors.ink },
+  input: { marginTop: 6, backgroundColor: pColors.surface, borderWidth: 1, borderColor: pColors.border, borderRadius: pRadii.md, paddingHorizontal: pSpacing.lg, height: 52, fontSize: 15, color: pColors.ink, outline: 'none', shadowOpacity: 0, shadowColor: 'transparent', elevation: 0 },
   err: { color: pColors.error, fontSize: 12 },
   services: { gap: pSpacing.sm },
   svcTile: { flexDirection: 'row', gap: pSpacing.md, alignItems: 'center', backgroundColor: pColors.surface, borderWidth: 1, borderColor: pColors.border, borderRadius: pRadii.md, paddingHorizontal: pSpacing.lg, paddingVertical: 14 },

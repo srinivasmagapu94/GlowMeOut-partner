@@ -1,10 +1,12 @@
-import { View, Text, StyleSheet, TextInput, Pressable, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+﻿import { View, Text, StyleSheet, TextInput, Pressable, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { pColors, pRadii, pSpacing, pType } from '@/src/theme';
-import { partnerApi } from '@/src/api';
+import { normalizePartnerMobileNumber, savePartnerPhone } from '@/src/api';
+
+const BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 export default function PartnerLogin() {
   const router = useRouter();
@@ -14,15 +16,29 @@ export default function PartnerLogin() {
 
   const send = async () => {
     setErr('');
-    const clean = phone.replace(/\D/g, '');
-    if (clean.length < 10) return setErr('Enter a valid 10-digit mobile number');
+    const normalized = normalizePartnerMobileNumber(phone);
+    if (!normalized) return setErr('Enter a valid 10-digit mobile number');
     try {
       setLoading(true);
-      await partnerApi('/partner/auth/otp/request', { method: 'POST', body: JSON.stringify({ phone: `+91${clean}` }) });
-      router.push({ pathname: '/otp', params: { phone: `+91${clean}` } });
+      const res = await fetch(`http://localhost:8080/ws_glowmeout_partner_services/partner/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mobileNumber: normalized }),
+      });
+
+      if (res.status === 200) {
+        await savePartnerPhone(normalized);
+        router.push({ pathname: '/otp', params: { phone: normalized } });
+        return;
+      }
+
+      const text = await res.text();
+      throw new Error(text || 'Login failed');
     } catch (e: any) {
       setErr(e.message);
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -41,13 +57,23 @@ export default function PartnerLogin() {
             <View style={styles.row}>
               <Text style={styles.prefix}>+91</Text>
               <View style={styles.dv} />
-              <TextInput testID="partner-phone-input" value={phone} onChangeText={setPhone} keyboardType="number-pad" maxLength={10} placeholder="98765 43210" placeholderTextColor={pColors.inkFaint} style={styles.input} />
+              <TextInput
+                testID="partner-phone-input"
+                value={phone}
+                onChangeText={setPhone}
+                keyboardType="number-pad"
+                maxLength={10}
+                placeholder="98765 43210"
+                placeholderTextColor={pColors.inkFaint}
+                selectionColor={pColors.goldDeep}
+                style={[styles.input, { outline: 'none', shadowOpacity: 0, elevation: 0, borderWidth: 0, backgroundColor: 'transparent' }]}
+              />
             </View>
             {!!err && <Text style={styles.err}>{err}</Text>}
           </View>
           <View style={styles.info}>
             <Feather name="shield" size={16} color={pColors.goldDeep} />
-            <Text style={styles.infoTxt}>Your session stays signed in on this device — you won't need OTP each time.</Text>
+            <Text style={styles.infoTxt}>Your session stays signed in on this device — you won&apos;t need OTP each time.</Text>
           </View>
         </ScrollView>
         <View style={styles.footer}>
