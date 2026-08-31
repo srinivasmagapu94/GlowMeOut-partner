@@ -6,22 +6,76 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { FadeInDown, ZoomIn } from 'react-native-reanimated';
 import { pColors, pRadii, pSpacing, pType } from '@/src/theme';
-import { clearPartnerSession, loadPartnerUser, partnerApi, updatePartnerUser } from '@/src/api';
+import { clearPartnerSession, loadPartnerProfileId, loadPartnerUser, partnerApi, updatePartnerUser } from '@/src/api';
+
+const BASE = 'http://localhost:8080/ws_glowmeout_partner_services/partner';
 
 export default function VerificationPending() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [checking, setChecking] = useState(false);
 
-  useEffect(() => { (async () => setUser(await loadPartnerUser()))(); }, []);
+  useEffect(() => {
+    (async () => {
+      const currentUser = await loadPartnerUser();
+      setUser(currentUser);
+      await check();
+    })();
+  }, []);
+
+  const fetchOnBoardValidation = async () => {
+    const currentUser = (await loadPartnerUser()) || user;
+    const partnerUUID =
+      (await loadPartnerProfileId()) ||
+      currentUser?.partnerUUID ||
+      currentUser?.partner_uuid ||
+      currentUser?.id ||
+      currentUser?.uuid;
+    if (!partnerUUID) throw new Error('Partner profile ID not found.');
+
+    const res = await fetch(`${BASE}/${partnerUUID}/fetchPartnerOnBoardValidation`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || 'Unable to load onboarding validation');
+    }
+
+    return res.json();
+  };
 
   const check = async () => {
     setChecking(true);
     try {
-      const res = await partnerApi('/partner/me');
-      await updatePartnerUser(res.user);
-      if (res.user.artist_status === 'approved') router.replace('/(tabs)/dashboard');
-      else setUser(res.user);
+      const validation = await fetchOnBoardValidation();
+      const isKycValid = validation?.isKYCValidated === true;
+      const isBankValid = validation?.isBankDetailsValidated === true;
+      const isCertificateValid = validation?.isCertificateValidated === true;
+      const isAccepted = validation?.isProfileAccepted === true;
+      const isRejected = validation?.isProfileRejected === true;
+
+      if (isAccepted) {
+        router.replace('/(tabs)/dashboard');
+        return;
+      }
+
+      setUser({
+        ...(await loadPartnerUser()),
+        validation,
+        onboarding: {
+          isKYCValidated: isKycValid,
+          isBankDetailsValidated: isBankValid,
+          isCertificateValidated: isCertificateValid,
+          isProfileAccepted: isAccepted,
+          isProfileRejected: isRejected,
+          comments: validation?.comments || '',
+        },
+      });
+    } catch (error) {
+      console.warn('Onboarding validation fetch failed', error);
+      setUser(await loadPartnerUser());
     } finally { setChecking(false); }
   };
 
