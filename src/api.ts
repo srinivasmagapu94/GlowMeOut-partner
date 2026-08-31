@@ -1,6 +1,6 @@
 ﻿import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+const BASE = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:8080/ws_glowmeout_partner_services';
 
 // Partner uses its own namespace so customer & partner sessions never collide.
 const TOKEN_KEY = 'partner_token';

@@ -13,6 +13,9 @@ export default function VerificationPending() {
   const [user, setUser] = useState<any>(null);
   const [checking, setChecking] = useState(false);
 
+  const certificateStatus = String(user?.certificate_verification_status || user?.certificateStatus || user?.verification?.certificate || 'pending').toLowerCase();
+  const isCertificateVerified = ['verified', 'approved', 'passed', 'success'].includes(certificateStatus);
+
   useEffect(() => { (async () => setUser(await loadPartnerUser()))(); }, []);
 
   const check = async () => {
@@ -58,13 +61,22 @@ export default function VerificationPending() {
           </Animated.View>
           <Animated.Text entering={FadeInDown.delay(200)} style={styles.title}>Application submitted</Animated.Text>
           <Animated.Text entering={FadeInDown.delay(300)} style={styles.sub}>
-            Welcome{user?.name ? `, ${user.name.split(' ')[0]}` : ''}. Our verification team will review your profile within 24–48 hours. You'll be notified when approved.
+            Welcome{user?.name ? `, ${user.name.split(' ')[0]}` : ''}. Our verification team will review your profile within 24–48 hours. You will be notified when approved.
           </Animated.Text>
+
+          <View style={styles.statusCard}>
+            <Text style={styles.statusLabel}>Certificate verification</Text>
+            <View style={styles.statusRow}>
+              <Feather name={isCertificateVerified ? 'check-circle' : 'alert-circle'} size={18} color={isCertificateVerified ? pColors.gold : 'rgba(246,245,241,0.7)'} />
+              <Text style={styles.statusValue}>{isCertificateVerified ? 'Verified by team' : 'Manual review pending'}</Text>
+            </View>
+          </View>
 
           <View style={styles.timeline}>
             {[
               { s: 'Application received', done: true },
-              { s: 'KYC & bank verification', done: false, active: true },
+              { s: 'Certificate verification', done: isCertificateVerified, active: !isCertificateVerified },
+              { s: 'KYC & bank verification', done: false },
               { s: 'Team approval', done: false },
               { s: 'Ready to accept bookings', done: false },
             ].map((t, i) => (
@@ -104,7 +116,11 @@ const styles = StyleSheet.create({
   badge: { width: 96, height: 96, borderRadius: 48, backgroundColor: 'rgba(201,162,75,0.15)', alignSelf: 'center', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: pColors.gold },
   title: { ...pType.display, color: pColors.surface, textAlign: 'center', marginTop: pSpacing.xl },
   sub: { color: 'rgba(246,245,241,0.75)', textAlign: 'center', ...pType.body, marginTop: pSpacing.md, paddingHorizontal: pSpacing.md, lineHeight: 22 },
-  timeline: { marginTop: pSpacing.xxl, gap: pSpacing.md },
+  statusCard: { marginTop: pSpacing.xl, padding: pSpacing.md, borderRadius: pRadii.md, backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(201,162,75,0.3)' },
+  statusLabel: { color: 'rgba(246,245,241,0.7)', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1.1 },
+  statusRow: { marginTop: 8, flexDirection: 'row', alignItems: 'center', gap: pSpacing.sm },
+  statusValue: { color: pColors.surface, fontSize: 15, fontWeight: '600' },
+  timeline: { marginTop: pSpacing.xl, gap: pSpacing.md },
   step: { flexDirection: 'row', alignItems: 'center', gap: pSpacing.md },
   stepDot: { width: 22, height: 22, borderRadius: 11, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
   stepDone: { backgroundColor: pColors.gold, borderColor: pColors.gold },

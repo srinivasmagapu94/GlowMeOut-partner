@@ -6,13 +6,18 @@ import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { pColors, pRadii, pSpacing, pType, SERVICE_CATALOG } from '@/src/theme';
-import { loadPartnerPhone, loadPartnerProfileId, partnerApi, savePartnerProfileId, updatePartnerUser } from '@/src/api';
+import { loadPartnerPhone, loadPartnerProfileId, savePartnerProfileId } from '@/src/api';
 
 const BASE = 'http://localhost:8080/ws_glowmeout_partner_services/partner';
 
 const SAMPLE_AVATAR = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&q=80';
+const MAX_CERTIFICATE_SIZE_BYTES = 5 * 1024 * 1024;
+const ALLOWED_CERTIFICATE_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg'];
 
 const STEPS = ['Personal', 'Services', 'Certificates', 'KYC', 'Bank details', 'Review'];
+
+const isValidAadhaar = (value: string) => /^\d{12}$/.test(value);
+const isValidPan = (value: string) => /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/i.test(value);
 
 export default function PartnerRegister() {
   const router = useRouter();
@@ -20,7 +25,7 @@ export default function PartnerRegister() {
   const [saving, setSaving] = useState(false);
 
   // step 1
-  const [profilePicture, setProfilePicture] = useState<string>(SAMPLE_AVATAR);
+  const [profilePicture] = useState<string>(SAMPLE_AVATAR);
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [address, setAddress] = useState('');
@@ -30,8 +35,7 @@ export default function PartnerRegister() {
   // step 2
   const [selected, setSelected] = useState<string[]>([]);
   // step 3
-  const [certs, setCerts] = useState<Array<{ name: string; institute: string; issue_date: string; comment: string }>>([]);
-  const [certDraft, setCertDraft] = useState({ name: '', institute: '', issue_date: '', comment: '' });
+  const [certs, setCerts] = useState<{ name: string; institute: string; issue_date: string; comment: string }[]>([]);
   // step 4
   const [kycType, setKycType] = useState<'aadhaar' | 'pan'>('aadhaar');
   const [kycNumber, setKycNumber] = useState('123456');
@@ -48,9 +52,26 @@ export default function PartnerRegister() {
   const canNext = () => {
     if (step === 0) return fullName.trim() && email.trim() && address.trim() && city.trim() && stateName.trim() && pincode.length === 6;
     if (step === 1) return selected.length > 0;
-    if (step === 3) return kycNumber.trim().length >= 8;
+    if (step === 2) return certs.length > 0;
+    if (step === 3) return !!kycDocument && ((kycType === 'aadhaar' && isValidAadhaar(kycNumber)) || (kycType === 'pan' && isValidPan(kycNumber)));
     if (step === 4) return bankName.trim() && accountHolder.trim() && ifsc.length >= 8 && accountNumber && accountNumber === confirmAccount;
     return true;
+  };
+
+  const validateCertificateAsset = (asset: { name?: string; mimeType?: string; size?: number }) => {
+    const name = (asset.name || '').toLowerCase();
+    const mimeType = (asset.mimeType || '').toLowerCase();
+    const isAllowedExtension = name.endsWith('.pdf') || name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg');
+    const isAllowedMimeType = ALLOWED_CERTIFICATE_TYPES.includes(mimeType);
+    const isWithinSizeLimit = (asset.size ?? 0) <= MAX_CERTIFICATE_SIZE_BYTES;
+
+    if (!isAllowedExtension && !isAllowedMimeType) {
+      throw new Error('Certificate must be a PDF, PNG, JPG, or JPEG file.');
+    }
+
+    if (!isWithinSizeLimit) {
+      throw new Error('Certificate size must be 5 MB or less.');
+    }
   };
 
   const toggleService = (id: string) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
@@ -66,6 +87,8 @@ export default function PartnerRegister() {
       if (result.canceled || !result.assets?.length) return;
 
       const asset = result.assets[0];
+      validateCertificateAsset(asset);
+
       const partnerUUID = await loadPartnerProfileId();
       if (!partnerUUID) {
         Alert.alert('Profile not saved', 'Please save personal details before uploading a certificate.');
@@ -167,6 +190,22 @@ export default function PartnerRegister() {
     }
   };
 
+  const validateKycAsset = (asset: { name?: string; mimeType?: string; size?: number }) => {
+    const name = (asset.name || '').toLowerCase();
+    const mimeType = (asset.mimeType || '').toLowerCase();
+    const isAllowedExtension = name.endsWith('.pdf') || name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg');
+    const isAllowedMimeType = ALLOWED_CERTIFICATE_TYPES.includes(mimeType);
+    const isWithinSizeLimit = (asset.size ?? 0) <= MAX_CERTIFICATE_SIZE_BYTES;
+
+    if (!isAllowedExtension && !isAllowedMimeType) {
+      throw new Error('KYC document must be a PDF, PNG, JPG, or JPEG file.');
+    }
+
+    if (!isWithinSizeLimit) {
+      throw new Error('KYC document size must be 5 MB or less.');
+    }
+  };
+
   const uploadKYC = async () => {
     const partnerUUID = await loadPartnerProfileId();
     if (!partnerUUID) {
@@ -184,6 +223,7 @@ export default function PartnerRegister() {
       if (result.canceled || !result.assets?.length) return;
 
       const asset = result.assets[0];
+      validateKycAsset(asset);
       const formData = new FormData();
 
       if (Platform.OS === 'web') {
@@ -273,21 +313,22 @@ export default function PartnerRegister() {
   const submit = async () => {
     try {
       setSaving(true);
-      const res = await partnerApi('/register', {
+      const partnerUUID = await loadPartnerProfileId();
+      if (!partnerUUID) throw new Error('Partner profile ID not found.');
+
+      const res = await fetch(`${BASE}/${partnerUUID}/submitForVerification`, {
         method: 'POST',
-        body: JSON.stringify({
-          profile_picture: profilePicture,
-          full_name: fullName, email, address, city, state: stateName, pincode,
-          service_categories: selected,
-          certificates: certs,
-          kyc_type: kycType, kyc_number: kycNumber,
-          bank_name: bankName, account_holder: accountHolder, ifsc, account_number: accountNumber, upi_id: upi,
-        }),
       });
-      await updatePartnerUser(res.user);
+
+      if (res.status !== 201) {
+        const text = await res.text();
+        throw new Error(text || 'Submit for verification failed');
+      }
+
       router.replace('/verification-pending');
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      alert(e.message || 'Failed to submit for verification');
     } finally { setSaving(false); }
   };
 
@@ -320,7 +361,25 @@ export default function PartnerRegister() {
       return;
     }
 
+    if (step === 2) {
+      if (!canNext()) {
+        Alert.alert('Certificate required', 'Please upload at least one valid certificate before continuing.');
+        return;
+      }
+      setStep(3);
+      return;
+    }
+
     if (step === 3) {
+      const validKycNumber = kycType === 'aadhaar' ? isValidAadhaar(kycNumber) : isValidPan(kycNumber);
+      if (!validKycNumber) {
+        Alert.alert('Invalid KYC', kycType === 'aadhaar' ? 'Enter a valid 12-digit Aadhaar number.' : 'Enter a valid 10-character PAN number.');
+        return;
+      }
+      if (!kycDocument) {
+        Alert.alert('KYC document required', 'Please upload your Aadhaar or PAN document before continuing.');
+        return;
+      }
       try {
         setSaving(true);
         await createKYC();
@@ -411,10 +470,10 @@ export default function PartnerRegister() {
             <View style={{ gap: pSpacing.md }}>
               <Text style={styles.helper}>Add your certificate document to complete this step.</Text>
 
-              <Pressable style={styles.upload}>
+              <Pressable style={styles.upload} onPress={addCert}>
                 <Feather name="upload-cloud" size={22} color={pColors.goldDeep} />
                 <Text style={styles.uploadTitle}>Upload certificate</Text>
-                <Text style={styles.uploadSub}>PDF or image, up to 5 MB</Text>
+                <Text style={styles.uploadSub}>{certificateFile ? certificateFile.name : 'PDF or image, up to 5 MB'}</Text>
               </Pressable>
 
               <Pressable style={styles.smallBtn} onPress={addCert}>
@@ -447,7 +506,8 @@ export default function PartnerRegister() {
               </View>
               <Field
                 label={kycType === 'aadhaar' ? '12-digit Aadhaar number' : '10-char PAN number'}
-                value={kycNumber} onChange={setKycNumber}
+                value={kycNumber}
+                onChange={(value: string) => setKycNumber(kycType === 'aadhaar' ? value.replace(/\D/g, '').slice(0, 12) : value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10))}
                 maxLen={kycType === 'aadhaar' ? 12 : 10}
                 kb={kycType === 'aadhaar' ? 'number-pad' : 'default'}
                 testID="kyc-number"
@@ -470,7 +530,7 @@ export default function PartnerRegister() {
                 <View style={{ flex: 1 }}><Field label="Account number" value={accountNumber} onChange={setAccountNumber} kb="number-pad" testID="acc-num" /></View>
               </View>
               <Field label="Confirm account number" value={confirmAccount} onChange={setConfirmAccount} kb="number-pad" testID="acc-confirm" />
-              {!!accountNumber && !!confirmAccount && accountNumber !== confirmAccount && <Text style={styles.err}>Account numbers don't match</Text>}
+              {!!accountNumber && !!confirmAccount && accountNumber !== confirmAccount && <Text style={styles.err}>Account numbers do not match</Text>}
               <View style={styles.upload}>
                 <Feather name="upload-cloud" size={22} color={pColors.goldDeep} />
                 <Text style={styles.uploadTitle}>Upload passbook front page</Text>

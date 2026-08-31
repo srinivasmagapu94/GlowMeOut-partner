@@ -6,7 +6,7 @@ import { Feather } from '@expo/vector-icons';
 import { pColors, pRadii, pSpacing, pType } from '@/src/theme';
 import { normalizePartnerMobileNumber, savePartnerPhone } from '@/src/api';
 
-const BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+const BASE = 'http://localhost:8080/ws_glowmeout_partner_services';
 
 export default function PartnerLogin() {
   const router = useRouter();
@@ -20,7 +20,7 @@ export default function PartnerLogin() {
     if (!normalized) return setErr('Enter a valid 10-digit mobile number');
     try {
       setLoading(true);
-      const res = await fetch(`http://localhost:8080/ws_glowmeout_partner_services/partner/login`, {
+      const res = await fetch(`${BASE}/partner/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mobileNumber: normalized }),

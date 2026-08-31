@@ -6,14 +6,16 @@ import { Feather } from '@expo/vector-icons';
 import { pColors, pRadii, pSpacing, pType } from '@/src/theme';
 import { normalizePartnerMobileNumber } from '@/src/api';
 
-const BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+const BASE = 'http://localhost:8080/ws_glowmeout_partner_services';
 
 export default function PartnerOtp() {
   const { phone } = useLocalSearchParams<{ phone: string }>();
   const normalizedPhone = normalizePartnerMobileNumber(Array.isArray(phone) ? phone[0] : phone || '');
   const router = useRouter();
   const [digits, setDigits] = useState(['', '', '', '', '', '']);
-  const refs = useRef<Array<TextInput | null>>([]);
+  const refs = useRef<(TextInput | null)[]>([]);
+  const verifyRequestId = useRef(0);
+  const pendingVerifyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
   const [seconds, setSeconds] = useState(30);
@@ -24,16 +26,32 @@ export default function PartnerOtp() {
   }, []);
 
   const set = (i: number, v: string) => {
+    if (pendingVerifyTimeoutRef.current) {
+      clearTimeout(pendingVerifyTimeoutRef.current);
+      pendingVerifyTimeoutRef.current = null;
+    }
+
     const val = v.replace(/\D/g, '').slice(0, 1);
-    const next = [...digits]; next[i] = val; setDigits(next);
-    if (val && i < 5) refs.current[i + 1]?.focus();
-    if (next.every((d) => d) && next.join('').length === 6) verify(next.join(''));
+    setErr('');
+    setDigits((prev) => {
+      const next = [...prev];
+      next[i] = val;
+      if (val && i < 5) refs.current[i + 1]?.focus();
+      if (next.every((d) => d) && next.join('').length === 6) {
+        const otp = next.join('');
+        const requestId = ++verifyRequestId.current;
+        pendingVerifyTimeoutRef.current = setTimeout(() => verify(otp, requestId), 0);
+      }
+      return next;
+    });
   };
 
-  const verify = async (code?: string) => {
+  const verify = async (code?: string, requestId?: number) => {
     setErr('');
     const otp = code || digits.join('');
     if (otp.length !== 6) return setErr('Enter the 6-digit code');
+
+    const currentRequestId = requestId ?? ++verifyRequestId.current;
     try {
       setLoading(true);
       const res = await fetch(`${BASE}/partner/verifyOTP`, {
@@ -42,21 +60,59 @@ export default function PartnerOtp() {
         body: JSON.stringify({ mobileNumber: normalizedPhone, otp }),
       });
 
-      // Temporarily disabled token/session saving.
-      // const response = await res.json();
-      // await savePartnerSession(response.token, response.user);
+      if (requestId !== undefined && currentRequestId !== verifyRequestId.current) {
+        return;
+      }
 
-      if (res.status === 200) {
+      let data: any = null;
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        try {
+          data = await res.json();
+        } catch {
+          const text = await res.text();
+          data = text ? { message: text } : null;
+        }
+      } else {
+        const text = await res.text();
+        data = text ? { message: text } : null;
+      }
+
+      if (requestId !== undefined && currentRequestId !== verifyRequestId.current) {
+        return;
+      }
+
+      const value = data?.isValidOTP ?? data?.validOTP ?? data?.isValid;
+      const isValidOtp = value === true || value === 'true' || value === 1 || value === '1';
+      const hasPartnerUuid = !!data?.partnerUUID;
+
+      if (res.ok && (isValidOtp || (hasPartnerUuid && !('isValidOTP' in data) && !('validOTP' in data) && !('isValid' in data)))) {
+        if (pendingVerifyTimeoutRef.current) {
+          clearTimeout(pendingVerifyTimeoutRef.current);
+          pendingVerifyTimeoutRef.current = null;
+        }
         router.replace('/register');
         return;
       }
 
-      const text = await res.text();
-      throw new Error(text || 'Invalid OTP');
-    } catch (e: any) {
-      setErr(e.message || 'Invalid code.');
+      setDigits(['', '', '', '', '', '']);
+      refs.current[0]?.focus();
+      setErr('Invalid OTP');
+    } catch {
+      if (requestId !== undefined && currentRequestId !== verifyRequestId.current) {
+        return;
+      }
+      setDigits(['', '', '', '', '', '']);
+      refs.current[0]?.focus();
+      setErr('Invalid OTP');
     } finally {
-      setLoading(false);
+      if (pendingVerifyTimeoutRef.current) {
+        clearTimeout(pendingVerifyTimeoutRef.current);
+        pendingVerifyTimeoutRef.current = null;
+      }
+      if (requestId === undefined || currentRequestId === verifyRequestId.current) {
+        setLoading(false);
+      }
     }
   };
 
