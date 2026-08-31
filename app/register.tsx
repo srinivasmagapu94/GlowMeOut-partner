@@ -52,7 +52,7 @@ export default function PartnerRegister() {
   const canNext = () => {
     if (step === 0) return fullName.trim() && email.trim() && address.trim() && city.trim() && stateName.trim() && pincode.length === 6;
     if (step === 1) return selected.length > 0;
-    if (step === 2) return certs.length > 0;
+    if (step === 2) return certs.length > 0 || !!certificateFile;
     if (step === 3) return !!kycDocument && ((kycType === 'aadhaar' && isValidAadhaar(kycNumber)) || (kycType === 'pan' && isValidPan(kycNumber)));
     if (step === 4) return bankName.trim() && accountHolder.trim() && ifsc.length >= 8 && accountNumber && accountNumber === confirmAccount;
     return true;
@@ -117,7 +117,7 @@ export default function PartnerRegister() {
         body: formData,
       });
 
-      if (response.status !== 200) {
+      if (!response.ok) {
         const errText = await response.text();
         Alert.alert('Certificate upload failed', errText || 'Please try again.');
         return;
@@ -246,7 +246,7 @@ export default function PartnerRegister() {
         body: formData,
       });
 
-      if (response.status !== 200) {
+      if (!response.ok) {
         const errText = await response.text();
         Alert.alert('KYC document upload failed', errText || 'Please try again.');
         return;
@@ -468,17 +468,12 @@ export default function PartnerRegister() {
 
           {step === 2 && (
             <View style={{ gap: pSpacing.md }}>
-              <Text style={styles.helper}>Add your certificate document to complete this step.</Text>
+              <Text style={styles.uploadHint}>Upload a Training certificate</Text>
 
               <Pressable style={styles.upload} onPress={addCert}>
                 <Feather name="upload-cloud" size={22} color={pColors.goldDeep} />
                 <Text style={styles.uploadTitle}>Upload certificate</Text>
                 <Text style={styles.uploadSub}>{certificateFile ? certificateFile.name : 'PDF or image, up to 5 MB'}</Text>
-              </Pressable>
-
-              <Pressable style={styles.smallBtn} onPress={addCert}>
-                <Feather name="plus" size={14} color={pColors.ink} />
-                <Text style={styles.smallBtnTxt}>Add certificate</Text>
               </Pressable>
 
               {certs.map((c, i) => (
@@ -642,6 +637,7 @@ const styles = StyleSheet.create({
   upload: { padding: pSpacing.xl, borderRadius: pRadii.md, backgroundColor: pColors.surface, borderWidth: 1, borderColor: pColors.border, borderStyle: 'dashed' as any, alignItems: 'center', gap: 4 },
   uploadTitle: { color: pColors.ink, fontWeight: '600', marginTop: 6 },
   uploadSub: { color: pColors.inkMuted, fontSize: 12 },
+  uploadHint: { color: pColors.goldDeep, fontSize: 14, fontWeight: '700', marginBottom: 4 },
   rev: { backgroundColor: pColors.surface, borderRadius: pRadii.md, borderWidth: 1, borderColor: pColors.border, padding: pSpacing.md },
   revTitle: { color: pColors.goldDeep, fontSize: 11, letterSpacing: 2, fontWeight: '800' },
   chipRow: { color: pColors.ink, fontSize: 14, marginTop: 6 },
