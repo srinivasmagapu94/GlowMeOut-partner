@@ -66,11 +66,16 @@ export const pShadow = {
 export const inr = (n: number) => `\u20B9${(n || 0).toLocaleString('en-IN')}`;
 
 export const SERVICE_CATALOG = [
-  { id: 'bridal', name: 'Bridal Makeup', icon: 'award' },
-  { id: 'reception', name: 'Reception Makeup', icon: 'star' },
-  { id: 'party', name: 'Party Makeup', icon: 'zap' },
-  { id: 'hair', name: 'Hair Styling', icon: 'scissors' },
-  { id: 'saree', name: 'Saree Draping', icon: 'wind' },
-  { id: 'nail', name: 'Nail Art', icon: 'feather' },
-  { id: 'mehendi', name: 'Mehendi', icon: 'droplet' },
+  { id: 'bridal', name: 'Bridal Makeup', icon: 'award', requiresCertificate: true },
+  { id: 'reception', name: 'Reception Makeup', icon: 'star', requiresCertificate: true },
+  { id: 'party', name: 'Party Makeup', icon: 'zap', requiresCertificate: true },
+  { id: 'hair', name: 'Hair Styling', icon: 'scissors', requiresCertificate: false },
+  { id: 'saree', name: 'Saree Draping', icon: 'wind', requiresCertificate: false },
+  { id: 'nail', name: 'Nail Art', icon: 'feather', requiresCertificate: false },
+  { id: 'mehendi', name: 'Mehendi', icon: 'droplet', requiresCertificate: false },
 ];
+
+export const serviceRequiresCertificate = (serviceId?: string) => {
+  if (!serviceId) return false;
+  return !!SERVICE_CATALOG.find((service) => service.id === serviceId)?.requiresCertificate;
+};

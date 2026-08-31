@@ -1,9 +1,9 @@
-import { View, Text, StyleSheet, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import { View, Text, StyleSheet, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform, Alert, BackHandler, ActivityIndicator } from 'react-native';
 import { Image } from 'expo-image';
 import * as DocumentPicker from 'expo-document-picker';
 import { Feather } from '@expo/vector-icons';
-import { useState } from 'react';
-import { useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { pColors, pRadii, pSpacing, pType, SERVICE_CATALOG } from '@/src/theme';
 import { loadPartnerPhone, loadPartnerProfileId, savePartnerProfileId } from '@/src/api';
@@ -18,11 +18,38 @@ const STEPS = ['Personal', 'Services', 'Certificates', 'KYC', 'Bank details', 'R
 
 const isValidAadhaar = (value: string) => /^\d{12}$/.test(value);
 const isValidPan = (value: string) => /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/i.test(value);
+const normalizeAccountNumber = (value: string) => (value || '').replace(/[\s-]/g, '').trim();
+const isValidIfsc = (value: string) => /^[A-Z]{4}0[A-Z0-9]{6}$/i.test((value || '').trim().toUpperCase());
+const isValidBankAccountNumber = (value: string) => /^\d{9,18}$/.test(normalizeAccountNumber(value));
+
+const buildMultipartFile = async (document: { name: string; uri: string; type?: string }) => {
+  if (Platform.OS === 'web') {
+    const blobResponse = await fetch(document.uri);
+    const blob = await blobResponse.blob();
+    return new File([blob], document.name || 'bank-document.pdf', {
+      type: document.type || 'application/pdf',
+    });
+  }
+
+  return {
+    uri: document.uri,
+    name: document.name || 'bank-document.pdf',
+    type: document.type || 'application/pdf',
+  } as any;
+};
 
 export default function PartnerRegister() {
   const router = useRouter();
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      const onBackPress = () => true;
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+      return () => subscription.remove();
+    }, []),
+  );
 
   // step 1
   const [profilePicture] = useState<string>(SAMPLE_AVATAR);
@@ -48,13 +75,34 @@ export default function PartnerRegister() {
   const [accountNumber, setAccountNumber] = useState('');
   const [confirmAccount, setConfirmAccount] = useState('');
   const [upi, setUpi] = useState('');
+  const [passbookDocument, setPassbookDocument] = useState<{ name: string; uri: string; type?: string } | null>(null);
+  const [passbookStatus, setPassbookStatus] = useState<'uploadDisabled' | 'uploadEnabled' | 'uploading' | 'processing' | 'verified' | 'mismatch' | 'unreadable'>('uploadDisabled');
+
+  const bankFormValid = Boolean(
+    bankName.trim() &&
+    accountHolder.trim() &&
+    isValidIfsc(ifsc) &&
+    isValidBankAccountNumber(accountNumber) &&
+    normalizeAccountNumber(accountNumber) === normalizeAccountNumber(confirmAccount),
+  );
+
+  useEffect(() => {
+    if (passbookStatus === 'uploading' || passbookStatus === 'processing') return;
+    if (!bankFormValid) {
+      setPassbookStatus('uploadDisabled');
+      return;
+    }
+    if (passbookStatus === 'uploadDisabled' || passbookStatus === 'uploadEnabled') {
+      setPassbookStatus('uploadEnabled');
+    }
+  }, [bankFormValid, passbookStatus]);
 
   const canNext = () => {
     if (step === 0) return fullName.trim() && email.trim() && address.trim() && city.trim() && stateName.trim() && pincode.length === 6;
     if (step === 1) return selected.length > 0;
-    if (step === 2) return certs.length > 0 || !!certificateFile;
+    if (step === 2) return true;
     if (step === 3) return !!kycDocument && ((kycType === 'aadhaar' && isValidAadhaar(kycNumber)) || (kycType === 'pan' && isValidPan(kycNumber)));
-    if (step === 4) return bankName.trim() && accountHolder.trim() && ifsc.length >= 8 && accountNumber && accountNumber === confirmAccount;
+    if (step === 4) return bankFormValid && !!passbookDocument && !saving;
     return true;
   };
 
@@ -263,6 +311,103 @@ export default function PartnerRegister() {
     }
   };
 
+  const uploadPassbook = async () => {
+    if (!bankFormValid) {
+      setPassbookStatus('uploadDisabled');
+      Alert.alert('Incomplete bank details', 'Please complete all required bank details before uploading the passbook document.');
+      return;
+    }
+
+    try {
+      setPassbookStatus('uploading');
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg'],
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+
+      if (result.canceled || !result.assets?.length) {
+        setPassbookStatus(bankFormValid ? 'uploadEnabled' : 'uploadDisabled');
+        return;
+      }
+
+      const asset = result.assets[0];
+      const name = (asset.name || '').toLowerCase();
+      const mimeType = (asset.mimeType || '').toLowerCase();
+      const allowedExt = name.endsWith('.pdf') || name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg');
+      const allowedMime = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg'].includes(mimeType);
+      const sizeOk = (asset.size ?? 0) <= MAX_CERTIFICATE_SIZE_BYTES;
+
+      if ((!allowedExt && !allowedMime) || !sizeOk) {
+        setPassbookStatus('unreadable');
+        Alert.alert('Invalid passbook document', 'Please upload a clear PDF or image file up to 5 MB.');
+        return;
+      }
+
+      setPassbookDocument({
+        name: asset.name || 'passbook-front-page.pdf',
+        uri: asset.uri,
+        type: asset.mimeType || 'application/pdf',
+      });
+      setPassbookStatus('uploadEnabled');
+      Alert.alert('Passbook uploaded', 'Your passbook document is ready for verification when you continue.');
+    } catch (error: any) {
+      setPassbookStatus('unreadable');
+      Alert.alert('Upload error', error?.message || 'Unable to process the passbook document.');
+    }
+  };
+
+  const validatePassbookDocument = async () => {
+    if (!bankFormValid) {
+      Alert.alert('Incomplete bank details', 'Please complete all required bank details before continuing.');
+      return false;
+    }
+
+    if (!passbookDocument) {
+      Alert.alert('Passbook required', 'Please upload the passbook front page before continuing.');
+      return false;
+    }
+
+    try {
+      setPassbookStatus('processing');
+      setSaving(true);
+
+      const formData = new FormData();
+      const file = await buildMultipartFile(passbookDocument);
+      formData.append('bankDocument', file as any);
+
+      const res = await fetch(`${BASE}/${encodeURIComponent(normalizeAccountNumber(accountNumber))}/validateBankDocument`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        setPassbookStatus('mismatch');
+        Alert.alert('Validation failed', text || 'Bank document validation failed.');
+        return false;
+      }
+
+      const data = await res.json();
+      const isValid = Boolean(data?.isValidDocument ?? data?.validDocument ?? false);
+
+      if (!isValid) {
+        setPassbookStatus('mismatch');
+        Alert.alert('Account number mismatch', 'The account number entered does not match the account number on the uploaded passbook. Please check your details and upload the correct passbook page.');
+        return false;
+      }
+
+      setPassbookStatus('verified');
+      return true;
+    } catch (error: any) {
+      setPassbookStatus('unreadable');
+      Alert.alert('Couldn\'t verify account number', 'We couldn\'t clearly read the account number from this document. Please upload a clear image of the passbook front page.');
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const createKYC = async () => {
     const partnerUUID = await loadPartnerProfileId();
     if (!partnerUUID) throw new Error('Partner profile ID not found.');
@@ -362,10 +507,6 @@ export default function PartnerRegister() {
     }
 
     if (step === 2) {
-      if (!canNext()) {
-        Alert.alert('Certificate required', 'Please upload at least one valid certificate before continuing.');
-        return;
-      }
       setStep(3);
       return;
     }
@@ -395,14 +536,13 @@ export default function PartnerRegister() {
 
     if (step === 4) {
       try {
-        setSaving(true);
+        const validated = await validatePassbookDocument();
+        if (!validated) return;
         await createBankDetails();
         setStep(5);
       } catch (e: any) {
         console.error(e);
         alert(e.message || 'Unable to save bank details');
-      } finally {
-        setSaving(false);
       }
       return;
     }
@@ -418,7 +558,7 @@ export default function PartnerRegister() {
   return (
     <SafeAreaView style={styles.c} testID="partner-register">
       <View style={styles.header}>
-        {step > 0 ? <Pressable onPress={() => setStep(step - 1)} style={styles.back}><Feather name="arrow-left" size={22} color={pColors.ink} /></Pressable> : <View style={{ width: 40 }} />}
+        <View style={{ width: 40 }} />
         <View style={{ alignItems: 'center' }}>
           <Text style={styles.step}>STEP {step + 1} / {STEPS.length}</Text>
           <Text style={styles.hTitle}>{STEPS[step]}</Text>
@@ -469,11 +609,16 @@ export default function PartnerRegister() {
           {step === 2 && (
             <View style={{ gap: pSpacing.md }}>
               <Text style={styles.uploadHint}>Upload a Training certificate</Text>
+              <Text style={styles.optionalHint}>Certificates are optional during onboarding. You can upload one now or later to unlock Makeup services.</Text>
 
               <Pressable style={styles.upload} onPress={addCert}>
                 <Feather name="upload-cloud" size={22} color={pColors.goldDeep} />
                 <Text style={styles.uploadTitle}>Upload certificate</Text>
                 <Text style={styles.uploadSub}>{certificateFile ? certificateFile.name : 'PDF or image, up to 5 MB'}</Text>
+              </Pressable>
+
+              <Pressable style={styles.skipBtn} onPress={() => setStep(3)}>
+                <Text style={styles.skipBtnTxt}>Skip for now</Text>
               </Pressable>
 
               {certs.map((c, i) => (
@@ -525,12 +670,51 @@ export default function PartnerRegister() {
                 <View style={{ flex: 1 }}><Field label="Account number" value={accountNumber} onChange={setAccountNumber} kb="number-pad" testID="acc-num" /></View>
               </View>
               <Field label="Confirm account number" value={confirmAccount} onChange={setConfirmAccount} kb="number-pad" testID="acc-confirm" />
-              {!!accountNumber && !!confirmAccount && accountNumber !== confirmAccount && <Text style={styles.err}>Account numbers do not match</Text>}
-              <View style={styles.upload}>
-                <Feather name="upload-cloud" size={22} color={pColors.goldDeep} />
-                <Text style={styles.uploadTitle}>Upload passbook front page</Text>
-                <Text style={styles.uploadSub}>Clear photo, up to 5 MB (mocked)</Text>
-              </View>
+
+              {!bankName.trim() && <Text style={styles.err}>Bank name is required.</Text>}
+              {!accountHolder.trim() && <Text style={styles.err}>Account holder name is required.</Text>}
+              {!!ifsc && !isValidIfsc(ifsc) && <Text style={styles.err}>Enter a valid IFSC code.</Text>}
+              {!!accountNumber && !isValidBankAccountNumber(accountNumber) && <Text style={styles.err}>Enter a valid account number.</Text>}
+              {!!accountNumber && !!confirmAccount && normalizeAccountNumber(accountNumber) !== normalizeAccountNumber(confirmAccount) && <Text style={styles.err}>Account numbers do not match.</Text>}
+
+              <Pressable
+                style={[
+                  styles.upload,
+                  (!bankFormValid || passbookStatus === 'uploading' || passbookStatus === 'processing') && styles.uploadDisabled,
+                ]}
+                onPress={uploadPassbook}
+                disabled={!bankFormValid || passbookStatus === 'uploading' || passbookStatus === 'processing'}
+              >
+                <Feather name="upload-cloud" size={22} color={bankFormValid ? pColors.goldDeep : pColors.inkFaint} />
+                <Text style={[styles.uploadTitle, !bankFormValid && { color: pColors.inkFaint }]}>{passbookDocument ? 'Upload passbook front page again' : 'Upload passbook front page'}</Text>
+                <Text style={[styles.uploadSub, !bankFormValid && { color: pColors.inkFaint }]}>
+                  {bankFormValid
+                    ? (passbookStatus === 'verified' ? 'Verified and matched' : passbookStatus === 'mismatch' ? 'Needs correction' : passbookStatus === 'unreadable' ? 'Upload a clear image of the passbook front page' : 'Upload a clear image of your passbook front page')
+                    : 'Complete all bank details above to enable document upload.'}
+                </Text>
+              </Pressable>
+
+              {passbookStatus === 'verified' && (
+                <View style={styles.verificationSuccess}>
+                  <Feather name="check-circle" size={16} color="#1B7F5A" />
+                  <Text style={styles.verificationSuccessText}>✓ Bank account verified</Text>
+                </View>
+              )}
+
+              {passbookStatus === 'mismatch' && (
+                <View style={styles.verificationError}>
+                  <Feather name="alert-circle" size={16} color="#B42318" />
+                  <Text style={styles.verificationErrorText}>Account number mismatch</Text>
+                </View>
+              )}
+
+              {passbookStatus === 'unreadable' && (
+                <View style={styles.verificationError}>
+                  <Feather name="alert-circle" size={16} color="#B42318" />
+                  <Text style={styles.verificationErrorText}>Couldn\'t verify account number</Text>
+                </View>
+              )}
+
               <Field label="UPI ID (optional)" value={upi} onChange={setUpi} testID="upi" />
             </View>
           )}
@@ -561,7 +745,14 @@ export default function PartnerRegister() {
             onPress={handlePrimaryAction}
             testID="reg-next"
           >
-            <Text style={styles.ctaTxt}>{step === STEPS.length - 1 ? (saving ? 'Submitting…' : 'Submit for verification') : (saving ? 'Saving…' : 'Save & continue')}</Text>
+            {saving ? (
+              <View style={styles.ctaLoading}>
+                <ActivityIndicator size="small" color={pColors.ink} />
+                <Text style={styles.ctaTxt}>{step === 4 ? 'Validating…' : step === STEPS.length - 1 ? 'Submitting…' : 'Saving…'}</Text>
+              </View>
+            ) : (
+              <Text style={styles.ctaTxt}>{step === STEPS.length - 1 ? 'Submit for verification' : 'Save & continue'}</Text>
+            )}
           </Pressable>
         </View>
       </KeyboardAvoidingView>
@@ -635,13 +826,22 @@ const styles = StyleSheet.create({
   pickBtnOn: { borderColor: pColors.gold, borderWidth: 2, backgroundColor: '#FFFDF6' },
   pickTxt: { color: pColors.inkMuted, fontWeight: '700' },
   upload: { padding: pSpacing.xl, borderRadius: pRadii.md, backgroundColor: pColors.surface, borderWidth: 1, borderColor: pColors.border, borderStyle: 'dashed' as any, alignItems: 'center', gap: 4 },
+  uploadDisabled: { opacity: 0.5, backgroundColor: pColors.surfaceMuted },
   uploadTitle: { color: pColors.ink, fontWeight: '600', marginTop: 6 },
   uploadSub: { color: pColors.inkMuted, fontSize: 12 },
-  uploadHint: { color: pColors.goldDeep, fontSize: 14, fontWeight: '700', marginBottom: 4 },
+  uploadHint: { color: pColors.goldDeep, fontSize: 16, fontWeight: '800', marginBottom: 2 },
+  optionalHint: { color: pColors.inkMuted, fontSize: 13, lineHeight: 18 },
+  skipBtn: { paddingVertical: 12, borderRadius: pRadii.pill, borderWidth: 1, borderColor: pColors.border, backgroundColor: pColors.surface, alignItems: 'center' },
+  skipBtnTxt: { color: pColors.ink, fontWeight: '700' },
+  verificationSuccess: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#E7F9F1', borderWidth: 1, borderColor: '#1B7F5A', borderRadius: pRadii.md, padding: pSpacing.md },
+  verificationSuccessText: { color: '#1B7F5A', fontWeight: '700' },
+  verificationError: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FDECEC', borderWidth: 1, borderColor: '#B42318', borderRadius: pRadii.md, padding: pSpacing.md },
+  verificationErrorText: { color: '#B42318', fontWeight: '700' },
   rev: { backgroundColor: pColors.surface, borderRadius: pRadii.md, borderWidth: 1, borderColor: pColors.border, padding: pSpacing.md },
   revTitle: { color: pColors.goldDeep, fontSize: 11, letterSpacing: 2, fontWeight: '800' },
   chipRow: { color: pColors.ink, fontSize: 14, marginTop: 6 },
   footer: { padding: pSpacing.xl, paddingTop: pSpacing.md, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: pColors.divider, backgroundColor: pColors.bg },
   cta: { backgroundColor: pColors.ink, borderRadius: pRadii.pill, paddingVertical: 18, alignItems: 'center' },
+  ctaLoading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   ctaTxt: { color: pColors.gold, fontWeight: '700', fontSize: 16, letterSpacing: 0.5 },
 });
