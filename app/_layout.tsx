@@ -7,6 +7,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { useIconFonts } from "@/src/hooks/use-icon-fonts";
 import { pColors } from '@/src/theme';
+import { AuthProvider } from '@/src/auth-context';
 
 LogBox.ignoreAllLogs(true);
 SplashScreen.preventAutoHideAsync();
@@ -18,13 +19,13 @@ export default function RootLayout() {
     if (loaded || error) SplashScreen.hideAsync();
   }, [loaded, error]);
 
-  if (!loaded && !error) return null;
-
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <StatusBar barStyle="light-content" backgroundColor={pColors.ink} />
-        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: pColors.bg } }} />
+        <AuthProvider>
+          <StatusBar barStyle="light-content" backgroundColor={pColors.ink} />
+          <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: pColors.bg } }} />
+        </AuthProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

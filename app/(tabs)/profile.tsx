@@ -6,6 +6,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { pColors, pRadii, pSpacing, pType, SERVICE_CATALOG } from '@/src/theme';
 import { clearPartnerSession, loadPartnerUser, partnerApi } from '@/src/api';
+import { signOutFromFirebase } from '@/src/auth';
 
 const MENU = [
   { icon: 'user', label: 'Personal details', route: '/edit-profile' },
@@ -29,7 +30,11 @@ export default function PartnerProfile() {
     })();
   }, []));
 
-  const logout = async () => { await clearPartnerSession(); router.replace('/landing'); };
+  const logout = async () => {
+    await signOutFromFirebase();
+    await clearPartnerSession();
+    router.replace('/landing');
+  };
 
   return (
     <View style={styles.c} testID="partner-profile">

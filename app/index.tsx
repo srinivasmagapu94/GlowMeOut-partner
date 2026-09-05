@@ -1,8 +1,9 @@
 import { useEffect } from 'react';
 import { View, StyleSheet, ActivityIndicator, Text } from 'react-native';
-import { useRouter } from 'expo-router';
-import { loadPartnerToken, loadPartnerUser } from '@/src/api';
+import { useRootNavigationState, useRouter } from 'expo-router';
+import { loadPartnerUser, partnerApi, updatePartnerUser } from '@/src/api';
 import { pColors } from '@/src/theme';
+import { useAuth } from '@/src/auth-context';
 
 /**
  * Standalone Partner app splash gate.
@@ -14,22 +15,47 @@ import { pColors } from '@/src/theme';
  */
 export default function Index() {
   const router = useRouter();
+  const rootNavigationState = useRootNavigationState();
+  const { isAuthenticated, isLoading } = useAuth();
 
   useEffect(() => {
+    if (!rootNavigationState?.key || isLoading) return;
+
+    let cancelled = false;
+
     (async () => {
       await new Promise((r) => setTimeout(r, 700));
-      const token = await loadPartnerToken();
-      const user = await loadPartnerUser();
-      if (token && user) {
-        const status = user.artist_status || 'unregistered';
+      if (cancelled) return;
+
+      if (!isAuthenticated) {
+        router.replace('/landing');
+        return;
+      }
+
+      try {
+        const profile = await partnerApi('/partner/me');
+        const profileUser = profile?.user || profile;
+        if (profileUser && typeof profileUser === 'object') {
+          await updatePartnerUser(profileUser);
+        }
+
+        const status = profileUser?.artist_status || 'unregistered';
         if (status === 'approved') router.replace('/(tabs)/dashboard');
         else if (status === 'unregistered') router.replace('/register');
         else router.replace('/verification-pending');
-      } else {
-        router.replace('/landing');
+      } catch {
+        const cachedUser = await loadPartnerUser();
+        const status = cachedUser?.artist_status || 'unregistered';
+        if (status === 'approved') router.replace('/(tabs)/dashboard');
+        else if (status === 'unregistered') router.replace('/register');
+        else router.replace('/verification-pending');
       }
     })();
-  }, []);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, isLoading, rootNavigationState?.key, router]);
 
   return (
     <View style={styles.c} testID="partner-splash">

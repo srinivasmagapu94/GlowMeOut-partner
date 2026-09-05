@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { pColors, pRadii, pSpacing, pType } from '@/src/theme';
 import { normalizePartnerMobileNumber } from '@/src/api';
+import { signInToFirebase } from '@/src/auth';
 
 const BASE = 'http://localhost:8080/ws_glowmeout_partner_services';
 
@@ -82,11 +83,36 @@ export default function PartnerOtp() {
         return;
       }
 
+      if (!res.ok) {
+        setDigits(['', '', '', '', '', '']);
+        refs.current[0]?.focus();
+        setErr(res.status === 400 ? 'Invalid OTP' : 'Unable to verify OTP. Please try again.');
+        return;
+      }
+
       const value = data?.isValidOTP ?? data?.validOTP ?? data?.isValid;
       const isValidOtp = value === true || value === 'true' || value === 1 || value === '1';
-      const hasPartnerUuid = !!data?.partnerUUID;
 
-      if (res.ok && (isValidOtp || (hasPartnerUuid && !('isValidOTP' in data) && !('validOTP' in data) && !('isValid' in data)))) {
+      if (isValidOtp) {
+        const customToken = typeof data?.customToken === 'string' ? data.customToken.trim() : '';
+        if (!customToken) {
+          setErr('Authentication failed. Please try again.');
+          return;
+        }
+
+        try {
+          const credential = await signInToFirebase(customToken);
+          if (!credential.user) {
+            setErr('Authentication failed. Please try again.');
+            return;
+          }
+
+          await credential.user.getIdToken();
+        } catch {
+          setErr('Authentication failed. Please try again.');
+          return;
+        }
+
         if (pendingVerifyTimeoutRef.current) {
           clearTimeout(pendingVerifyTimeoutRef.current);
           pendingVerifyTimeoutRef.current = null;
@@ -104,7 +130,7 @@ export default function PartnerOtp() {
       }
       setDigits(['', '', '', '', '', '']);
       refs.current[0]?.focus();
-      setErr('Invalid OTP');
+      setErr('Unable to verify OTP. Check your connection and try again.');
     } finally {
       if (pendingVerifyTimeoutRef.current) {
         clearTimeout(pendingVerifyTimeoutRef.current);
@@ -118,12 +144,18 @@ export default function PartnerOtp() {
 
   const resend = async () => {
     if (seconds > 0) return;
-    setSeconds(30);
-    await fetch(`${BASE}/partner/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mobileNumber: normalizedPhone }),
-    });
+    try {
+      setSeconds(30);
+      const res = await fetch(`${BASE}/partner/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mobileNumber: normalizedPhone }),
+      });
+      if (!res.ok) throw new Error('Unable to resend OTP');
+    } catch {
+      setSeconds(0);
+      setErr('Unable to resend OTP. Please try again.');
+    }
   };
 
   return (

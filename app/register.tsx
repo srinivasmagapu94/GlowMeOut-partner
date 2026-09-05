@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { pColors, pRadii, pSpacing, pType, SERVICE_CATALOG } from '@/src/theme';
-import { loadPartnerPhone, loadPartnerProfileId, savePartnerProfileId } from '@/src/api';
+import { authenticatedFetch, loadPartnerPhone, loadPartnerProfileId, savePartnerProfileId } from '@/src/api';
 
 const BASE = 'http://localhost:8080/ws_glowmeout_partner_services/partner';
 
@@ -160,7 +160,7 @@ export default function PartnerRegister() {
         } as any);
       }
 
-      const response = await fetch(`${BASE}/${partnerUUID}/uploadCertificate`, {
+      const response = await authenticatedFetch(`${BASE}/${partnerUUID}/uploadCertificate`, {
         method: 'POST',
         body: formData,
       });
@@ -192,7 +192,7 @@ export default function PartnerRegister() {
     const phone = await loadPartnerPhone();
     if (!phone) throw new Error('Mobile number not found. Please log in again.');
 
-    const res = await fetch(`${BASE}/createProfile`, {
+    const res = await authenticatedFetch(`${BASE}/createProfile`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -221,7 +221,7 @@ export default function PartnerRegister() {
     const partnerUUID = await loadPartnerProfileId();
     if (!partnerUUID) throw new Error('Partner profile ID not found.');
 
-    const res = await fetch(`${BASE}/createServices`, {
+    const res = await authenticatedFetch(`${BASE}/createServices`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -289,7 +289,7 @@ export default function PartnerRegister() {
         } as any);
       }
 
-      const response = await fetch(`${BASE}/${partnerUUID}/uploadKYC`, {
+      const response = await authenticatedFetch(`${BASE}/${partnerUUID}/uploadKYC`, {
         method: 'POST',
         body: formData,
       });
@@ -376,7 +376,7 @@ export default function PartnerRegister() {
       const file = await buildMultipartFile(passbookDocument);
       formData.append('bankDocument', file as any);
 
-      const res = await fetch(`${BASE}/${encodeURIComponent(normalizeAccountNumber(accountNumber))}/validateBankDocument`, {
+      const res = await authenticatedFetch(`${BASE}/${encodeURIComponent(normalizeAccountNumber(accountNumber))}/validateBankDocument`, {
         method: 'POST',
         body: formData,
       });
@@ -418,7 +418,7 @@ export default function PartnerRegister() {
       panNumber: kycType === 'pan' ? kycNumber : null,
     };
 
-    const res = await fetch(`${BASE}/createPartnerKYC`, {
+    const res = await authenticatedFetch(`${BASE}/createPartnerKYC`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -443,7 +443,7 @@ export default function PartnerRegister() {
       confirmAccountNumber: confirmAccount,
     };
 
-    const res = await fetch(`${BASE}/createPartnerBankDetails`, {
+    const res = await authenticatedFetch(`${BASE}/createPartnerBankDetails`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -461,7 +461,7 @@ export default function PartnerRegister() {
       const partnerUUID = await loadPartnerProfileId();
       if (!partnerUUID) throw new Error('Partner profile ID not found.');
 
-      const res = await fetch(`${BASE}/${partnerUUID}/submitForVerification`, {
+      const res = await authenticatedFetch(`${BASE}/${partnerUUID}/submitForVerification`, {
         method: 'POST',
       });
 

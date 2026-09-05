@@ -5,7 +5,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { pColors, pRadii, pSpacing, pType, inr, SERVICE_CATALOG, serviceRequiresCertificate } from '@/src/theme';
-import { loadPartnerProfileId, partnerApi } from '@/src/api';
+import { authenticatedFetch, loadPartnerProfileId, partnerApi } from '@/src/api';
 
 const BASE = 'http://localhost:8080/ws_glowmeout_partner_services';
 
@@ -104,7 +104,7 @@ export default function Services() {
         formData.append('certificate', file);
       }
 
-      const response = await fetch(`${BASE}/partner/${partnerUUID}/uploadCertificate`, {
+      const response = await authenticatedFetch(`${BASE}/partner/${partnerUUID}/uploadCertificate`, {
         method: 'POST',
         body: formData,
       });

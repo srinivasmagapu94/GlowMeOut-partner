@@ -1,9 +1,9 @@
 ﻿import AsyncStorage from '@react-native-async-storage/async-storage';
+import { auth, signOutFromFirebase } from '@/src/auth';
 
 const BASE = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:8080/ws_glowmeout_partner_services';
 
 // Partner uses its own namespace so customer & partner sessions never collide.
-const TOKEN_KEY = 'partner_token';
 const USER_KEY = 'partner_user';
 const PHONE_KEY = 'partner_phone';
 const PARTNER_UUID_KEY = 'partner_uuid';
@@ -16,10 +16,30 @@ export function normalizePartnerMobileNumber(phone: string) {
   return digits.startsWith('+') ? digits : `+${digits}`;
 }
 
+export async function authenticatedFetch(input: RequestInfo | URL, opts: RequestInit = {}) {
+  const headers = new Headers(opts.headers);
+  const isFormData = typeof FormData !== 'undefined' && opts.body instanceof FormData;
+  if (!headers.has('Content-Type') && !isFormData) headers.set('Content-Type', 'application/json');
+
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error('Firebase authentication is required');
+  }
+
+  if (user) {
+    headers.set('Authorization', `Bearer ${await user.getIdToken()}`);
+  }
+
+  const response = await fetch(input, { ...opts, headers });
+  if (response.status !== 401) return response;
+
+  const retryHeaders = new Headers(headers);
+  retryHeaders.set('Authorization', 'Bearer ' + await auth.currentUser!.getIdToken(true));
+  return fetch(input, { ...opts, headers: retryHeaders });
+}
+
 export async function partnerApi(path: string, opts: RequestInit = {}) {
-  // Temporarily disabled token auth for the partner login flow.
-  // const t = await AsyncStorage.getItem(TOKEN_KEY);
-  const res = await fetch(`${BASE}/api${path}`, {
+  const res = await authenticatedFetch(`${BASE}/api${path}`, {
     ...opts,
     headers: {
       'Content-Type': 'application/json',
@@ -29,7 +49,10 @@ export async function partnerApi(path: string, opts: RequestInit = {}) {
   });
   if (!res.ok) {
     const text = await res.text();
-    if (res.status === 401) { await clearPartnerSession(); }
+    if (res.status === 401) {
+      await signOutFromFirebase();
+      await clearPartnerSession();
+    }
     throw new Error(text || `HTTP ${res.status}`);
   }
   const contentType = res.headers.get('content-type') || '';
@@ -64,10 +87,6 @@ export async function partnerLogin(mobileNumber: string) {
   }
 }
 
-export async function savePartnerSession(token: string, user: any) {
-  await AsyncStorage.setItem(TOKEN_KEY, token);
-  await AsyncStorage.setItem(USER_KEY, JSON.stringify(user));
-}
 export async function savePartnerPhone(phone: string) {
   await AsyncStorage.setItem(PHONE_KEY, phone);
 }
@@ -84,12 +103,9 @@ export async function loadPartnerUser() {
   const s = await AsyncStorage.getItem(USER_KEY);
   return s ? JSON.parse(s) : null;
 }
-export async function loadPartnerToken() {
-  return AsyncStorage.getItem(TOKEN_KEY);
-}
 export async function updatePartnerUser(user: any) {
   await AsyncStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 export async function clearPartnerSession() {
-  await AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY, PHONE_KEY, PARTNER_UUID_KEY]);
+  await AsyncStorage.multiRemove([USER_KEY, PHONE_KEY, PARTNER_UUID_KEY]);
 }

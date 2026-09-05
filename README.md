@@ -23,7 +23,7 @@ EXPO_PUBLIC_BACKEND_URL=https://your-backend.example.com
 
 ## Session persistence
 
-Sessions are stored under `partner_token` / `partner_user` (AsyncStorage). On app launch the splash gate (`app/index.tsx`) restores the session and routes:
+Firebase Authentication is the source of truth for the signed-in session and restores authentication across app launches. The splash gate (`app/index.tsx`) checks Firebase auth state, then loads partner profile status to route:
 
 - **Approved** partner → `/(tabs)/dashboard`
 - **Pending / rejected** → `/verification-pending`

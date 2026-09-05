@@ -6,7 +6,8 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { FadeInDown, ZoomIn } from 'react-native-reanimated';
 import { pColors, pRadii, pSpacing, pType } from '@/src/theme';
-import { clearPartnerSession, loadPartnerProfileId, loadPartnerUser, partnerApi, updatePartnerUser } from '@/src/api';
+import { authenticatedFetch, clearPartnerSession, loadPartnerProfileId, loadPartnerUser, partnerApi, updatePartnerUser } from '@/src/api';
+import { signOutFromFirebase } from '@/src/auth';
 
 const BASE = 'http://localhost:8080/ws_glowmeout_partner_services/partner';
 
@@ -33,7 +34,7 @@ export default function VerificationPending() {
       currentUser?.uuid;
     if (!partnerUUID) throw new Error('Partner profile ID not found.');
 
-    const res = await fetch(`${BASE}/${partnerUUID}/fetchPartnerOnBoardValidation`, {
+    const res = await authenticatedFetch(`${BASE}/${partnerUUID}/fetchPartnerOnBoardValidation`, {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' },
     });
@@ -90,6 +91,7 @@ export default function VerificationPending() {
   };
 
   const logout = async () => {
+    await signOutFromFirebase();
     await clearPartnerSession();
     router.replace('/landing');
   };
