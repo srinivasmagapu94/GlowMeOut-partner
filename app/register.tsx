@@ -3,12 +3,13 @@ import { Image } from 'expo-image';
 import * as DocumentPicker from 'expo-document-picker';
 import { Feather } from '@expo/vector-icons';
 import { useCallback, useEffect, useState } from 'react';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { pColors, pRadii, pSpacing, pType, SERVICE_CATALOG } from '@/src/theme';
 import { authenticatedFetch, loadPartnerPhone, loadPartnerProfileId, savePartnerProfileId } from '@/src/api';
+import { getOnboardingDecision } from '@/src/onboarding';
 
-const BASE = 'http://localhost:8080/ws_glowmeout_partner_services/partner';
+const BASE = `${process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:8080/ws_glowmeout_partner_services'}/partner`;
 
 const SAMPLE_AVATAR = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&q=80';
 const MAX_CERTIFICATE_SIZE_BYTES = 5 * 1024 * 1024;
@@ -40,6 +41,7 @@ const buildMultipartFile = async (document: { name: string; uri: string; type?: 
 
 export default function PartnerRegister() {
   const router = useRouter();
+  const { step: requestedStep } = useLocalSearchParams<{ step?: string }>();
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
 
@@ -77,6 +79,31 @@ export default function PartnerRegister() {
   const [upi, setUpi] = useState('');
   const [passbookDocument, setPassbookDocument] = useState<{ name: string; uri: string; type?: string } | null>(null);
   const [passbookStatus, setPassbookStatus] = useState<'uploadDisabled' | 'uploadEnabled' | 'uploading' | 'processing' | 'verified' | 'mismatch' | 'unreadable'>('uploadDisabled');
+
+  useEffect(() => {
+    const parsedStep = Number(Array.isArray(requestedStep) ? requestedStep[0] : requestedStep);
+    if (Number.isInteger(parsedStep) && parsedStep >= 0 && parsedStep < STEPS.length) setStep(parsedStep);
+  }, [requestedStep]);
+
+  const refreshOnboardingRoute = async () => {
+    const profile = await (await fetch(`${BASE}/me`, {
+      headers: { Authorization: `Bearer ${await (await import('@/src/auth')).getFirebaseIdToken()}` },
+    })).json();
+    const decision = getOnboardingDecision(profile);
+    if (decision.kind === 'home') {
+      router.replace('/(tabs)/dashboard');
+      return true;
+    }
+    if (decision.kind === 'onboarding') {
+      if (decision.step === 'personalDetails') setStep(0);
+      else if (decision.step === 'servicesOffered') setStep(1);
+      else if (decision.step === 'certificateVerification') setStep(2);
+      else if (decision.step === 'panVerification') setStep(3);
+      else if (decision.step === 'bankVerification') setStep(4);
+      else router.replace(decision.route);
+    }
+    return false;
+  };
 
   const bankFormValid = Boolean(
     bankName.trim() &&
@@ -344,13 +371,36 @@ export default function PartnerRegister() {
         return;
       }
 
-      setPassbookDocument({
+      const partnerUUID = await loadPartnerProfileId();
+      if (!partnerUUID) {
+        throw new Error('Partner profile ID not found.');
+      }
+
+      const passbookDocument = {
         name: asset.name || 'passbook-front-page.pdf',
         uri: asset.uri,
         type: asset.mimeType || 'application/pdf',
-      });
+      };
+      const formData = new FormData();
+      const file = await buildMultipartFile(passbookDocument);
+      formData.append('bankDocument', file as any);
+
+      const response = await authenticatedFetch(
+        `${BASE}/${encodeURIComponent(partnerUUID)}/uploadBankDocument`,
+        {
+          method: 'POST',
+          body: formData,
+        },
+      );
+
+      if (response.status !== 201) {
+        const text = await response.text();
+        throw new Error(text || 'Bank document upload failed.');
+      }
+
+      setPassbookDocument(passbookDocument);
       setPassbookStatus('uploadEnabled');
-      Alert.alert('Passbook uploaded', 'Your passbook document is ready for verification when you continue.');
+      Alert.alert('Passbook uploaded', 'Your passbook document was uploaded successfully.');
     } catch (error: any) {
       setPassbookStatus('unreadable');
       Alert.alert('Upload error', error?.message || 'Unable to process the passbook document.');
@@ -470,7 +520,7 @@ export default function PartnerRegister() {
         throw new Error(text || 'Submit for verification failed');
       }
 
-      router.replace('/verification-pending');
+      await refreshOnboardingRoute();
     } catch (e: any) {
       console.error(e);
       alert(e.message || 'Failed to submit for verification');
@@ -482,6 +532,8 @@ export default function PartnerRegister() {
       try {
         setSaving(true);
         await createProfile();
+        // The createProfile response confirms the first step; the profile-status
+        // endpoint may not expose onboarding statuses until the next request.
         setStep(1);
       } catch (e: any) {
         console.error(e);

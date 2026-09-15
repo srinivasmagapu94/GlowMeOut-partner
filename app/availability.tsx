@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { pColors, pRadii, pSpacing, pType } from '@/src/theme';
 import { partnerApi } from '@/src/api';
+import { getOnboardingDecision } from '@/src/onboarding';
 
 const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 
@@ -29,7 +30,8 @@ export default function Availability() {
         max_per_day: parseInt(data.max_per_day) || 3, travel_radius_km: parseInt(data.travel_radius_km) || 15,
         cities: (data.cities || []),
       }) });
-      router.back();
+      const decision = getOnboardingDecision(await partnerApi('/partner/me'));
+      if (decision.kind !== 'unknown') router.replace(decision.route);
     } finally { setSaving(false); }
   };
 

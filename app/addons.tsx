@@ -5,10 +5,15 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { pColors, pRadii, pSpacing, pType, inr } from '@/src/theme';
 import { partnerApi } from '@/src/api';
+import { ActivationGate } from '@/src/onboarding-guard';
 
 const SUGGESTIONS = ['Hair Styling', 'Saree Draping', 'Hair Extensions', 'Touch Up', 'False Lashes', 'Trial Makeup', 'Travel Charges', 'Extra Person'];
 
 export default function Addons() {
+  return <ActivationGate><AddonsContent /></ActivationGate>;
+}
+
+function AddonsContent() {
   const router = useRouter();
   const [items, setItems] = useState<any[]>([]);
   const [open, setOpen] = useState(false);

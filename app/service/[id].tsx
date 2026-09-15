@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { pColors, pRadii, pSpacing, pType, SERVICE_CATALOG } from '@/src/theme';
 import { partnerApi } from '@/src/api';
+import { ActivationGate } from '@/src/onboarding-guard';
 
 const MODES = [
   { k: 'fixed', title: 'Fixed price', sub: 'One flat price · quickest to set up', icon: 'tag' },
@@ -16,6 +17,10 @@ const MODES = [
 const FIXED_ONLY_CATEGORIES = new Set(['saree']);
 
 export default function ServiceEditor() {
+  return <ActivationGate><ServiceEditorContent /></ActivationGate>;
+}
+
+function ServiceEditorContent() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const router = useRouter();
   const editing = id && id !== 'new';

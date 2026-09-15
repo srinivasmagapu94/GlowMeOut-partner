@@ -5,8 +5,13 @@ import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { pColors, pRadii, pSpacing, pType, inr } from '@/src/theme';
 import { partnerApi } from '@/src/api';
+import { ActivationGate } from '@/src/onboarding-guard';
 
 export default function Earnings() {
+  return <ActivationGate><EarningsContent /></ActivationGate>;
+}
+
+function EarningsContent() {
   const [data, setData] = useState<any>({});
   const [refreshing, setRefreshing] = useState(false);
   const load = useCallback(async () => {

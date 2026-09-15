@@ -6,8 +6,13 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { pColors, pRadii, pSpacing, pType, inr } from '@/src/theme';
 import { partnerApi } from '@/src/api';
+import { ActivationGate } from '@/src/onboarding-guard';
 
 export default function BookingDetail() {
+  return <ActivationGate><BookingDetailContent /></ActivationGate>;
+}
+
+function BookingDetailContent() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const [b, setB] = useState<any>(null);

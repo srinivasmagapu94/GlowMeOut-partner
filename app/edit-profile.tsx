@@ -6,6 +6,7 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { pColors, pRadii, pSpacing, pType } from '@/src/theme';
 import { partnerApi, updatePartnerUser } from '@/src/api';
+import { getOnboardingDecision } from '@/src/onboarding';
 
 export default function EditPartnerProfile() {
   const router = useRouter();
@@ -30,7 +31,8 @@ export default function EditPartnerProfile() {
       const p = await partnerApi('/partner/profile', { method: 'PATCH', body: JSON.stringify(payload) });
       const me = await partnerApi('/partner/me');
       await updatePartnerUser(me.user);
-      router.back();
+      const decision = getOnboardingDecision(me);
+      if (decision.kind !== 'unknown') router.replace(decision.route);
     } finally { setSaving(false); }
   };
 

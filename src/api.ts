@@ -1,5 +1,5 @@
 ﻿import AsyncStorage from '@react-native-async-storage/async-storage';
-import { auth, signOutFromFirebase } from '@/src/auth';
+import { auth, getFirebaseIdToken, signOutFromFirebase } from '@/src/auth';
 
 const BASE = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:8080/ws_glowmeout_partner_services';
 
@@ -26,9 +26,7 @@ export async function authenticatedFetch(input: RequestInfo | URL, opts: Request
     throw new Error('Firebase authentication is required');
   }
 
-  if (user) {
-    headers.set('Authorization', `Bearer ${await user.getIdToken()}`);
-  }
+  headers.set('Authorization', `Bearer ${await getFirebaseIdToken()}`);
 
   const response = await fetch(input, { ...opts, headers });
   if (response.status !== 401) return response;
@@ -99,6 +97,21 @@ export async function savePartnerProfileId(uuid: string) {
 export async function loadPartnerProfileId() {
   return AsyncStorage.getItem(PARTNER_UUID_KEY);
 }
+
+export async function fetchPartnerProfile(partnerUUID: string) {
+  const response = await authenticatedFetch(
+    `${BASE}/partner/${encodeURIComponent(partnerUUID)}/profile`,
+    { method: 'GET' },
+  );
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
 export async function loadPartnerUser() {
   const s = await AsyncStorage.getItem(USER_KEY);
   return s ? JSON.parse(s) : null;

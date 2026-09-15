@@ -6,21 +6,26 @@ import { useCallback, useState } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { pColors, pRadii, pShadow, pSpacing, pType, inr } from '@/src/theme';
-import { loadPartnerUser, partnerApi } from '@/src/api';
+import { fetchPartnerProfile, loadPartnerProfileId, loadPartnerUser } from '@/src/api';
+import { ActivationGate } from '@/src/onboarding-guard';
 
 export default function Dashboard() {
+  return <ActivationGate><DashboardContent /></ActivationGate>;
+}
+
+function DashboardContent() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
-  const [data, setData] = useState<any>(null);
+  const [profile, setProfile] = useState<any>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     setUser(await loadPartnerUser());
-    try { setData(await partnerApi('/partner/dashboard')); } catch {}
+    const partnerUUID = await loadPartnerProfileId();
+    if (!partnerUUID) throw new Error('Partner profile ID not found.');
+    setProfile(await fetchPartnerProfile(partnerUUID));
   }, []);
   useFocusEffect(useCallback(() => { load(); }, [load]));
-
-  const m = data?.metrics || {};
 
   return (
     <View style={styles.c} testID="partner-dashboard">
@@ -34,7 +39,7 @@ export default function Dashboard() {
           <View style={styles.header}>
             <View style={{ flex: 1 }}>
               <Text style={styles.hello}>Welcome back</Text>
-              <Text style={styles.name}>{user?.name || 'Partner'}</Text>
+              <Text style={styles.name}>{profile?.fullName || user?.name || 'Partner'}</Text>
             </View>
             <Pressable style={styles.iconBtn} onPress={() => router.push('/notifications')} testID="notif-btn">
               <Feather name="bell" size={18} color={pColors.gold} />
@@ -46,18 +51,18 @@ export default function Dashboard() {
           <View style={styles.hero}>
             <LinearGradient colors={[pColors.ink, '#1F252E']} style={StyleSheet.absoluteFillObject} />
             <View style={styles.heroBadge}><Feather name="dollar-sign" size={11} color={pColors.gold} /><Text style={styles.heroBadgeTxt}>TODAY'S EARNINGS</Text></View>
-            <Text style={styles.heroAmt}>{inr(m.today_earnings || 0)}</Text>
+            <Text style={styles.heroAmt}>{profile?.accountStatus || 'ACTIVE'}</Text>
             <View style={styles.heroLine} />
             <View style={styles.heroFoot}>
               <View>
                 <Text style={styles.heroLbl}>Total earned</Text>
-                <Text style={styles.heroVal}>{inr(m.total_earnings || 0)}</Text>
+                <Text style={styles.heroVal}>{profile?.city || '—'}</Text>
               </View>
               <View style={{ alignItems: 'flex-end' }}>
                 <Text style={styles.heroLbl}>Rating</Text>
                 <View style={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
                   <Feather name="star" size={13} color={pColors.gold} />
-                  <Text style={styles.heroVal}>{m.rating || '5.0'}</Text>
+                  <Text style={styles.heroVal}>{profile?.verificationStatus || '—'}</Text>
                 </View>
               </View>
             </View>
@@ -65,8 +70,8 @@ export default function Dashboard() {
 
           {/* Metric row */}
           <View style={styles.metrics}>
-            <MetricCard icon="inbox" label="Pending" value={String(m.pending_requests || 0)} accent onPress={() => router.push('/(tabs)/jobs')} />
-            <MetricCard icon="calendar" label="Upcoming" value={String(m.upcoming_count || 0)} onPress={() => router.push('/(tabs)/jobs')} />
+            <MetricCard icon="inbox" label="Pending" value="—" accent onPress={() => router.push('/(tabs)/jobs')} />
+            <MetricCard icon="calendar" label="Upcoming" value="—" onPress={() => router.push('/(tabs)/jobs')} />
           </View>
 
           {/* Quick actions */}
@@ -78,26 +83,13 @@ export default function Dashboard() {
 
           {/* Today's jobs */}
           <Text style={styles.section}>Today's schedule</Text>
-          {(data?.upcoming || []).length === 0 ? (
-            <View style={styles.empty}>
-              <Feather name="coffee" size={24} color={pColors.goldDeep} />
-              <Text style={styles.emptyTitle}>No jobs today</Text>
-              <Text style={styles.emptySub}>Enjoy the day. New requests will appear here.</Text>
-            </View>
-          ) : (data?.upcoming || []).map((b: any) => (
-            <Pressable key={b.id} style={styles.job} onPress={() => router.push({ pathname: '/booking/[id]', params: { id: b.id } })}>
-              <View style={styles.jobTime}><Text style={styles.jobTimeTxt}>{b.time}</Text></View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.jobService}>{b.service_name}</Text>
-                <Text style={styles.jobMeta}>{b.customer?.name || 'Customer'} · {b.date}</Text>
-                <Text style={styles.jobAddr} numberOfLines={1}>{b.address}</Text>
-              </View>
-              <View style={{ alignItems: 'flex-end' }}>
-                <Text style={styles.jobPrice}>{inr(b.price)}</Text>
-                <Feather name="chevron-right" size={16} color={pColors.inkFaint} style={{ marginTop: 4 }} />
-              </View>
-            </Pressable>
-          ))}
+          <View style={styles.empty}>
+            <Feather name="user-check" size={24} color={pColors.goldDeep} />
+            <Text style={styles.emptyTitle}>Profile loaded</Text>
+            <Text style={styles.emptySub}>
+              {profile?.emailAddress || profile?.mobileNumber || 'Your partner profile is active.'}
+            </Text>
+          </View>
         </ScrollView>
       </SafeAreaView>
     </View>

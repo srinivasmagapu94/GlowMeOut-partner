@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { pColors, pRadii, pSpacing, pType } from '@/src/theme';
-import { normalizePartnerMobileNumber } from '@/src/api';
+import { normalizePartnerMobileNumber, savePartnerProfileId } from '@/src/api';
 import { signInToFirebase } from '@/src/auth';
 
 const BASE = 'http://localhost:8080/ws_glowmeout_partner_services';
@@ -94,6 +94,12 @@ export default function PartnerOtp() {
       const isValidOtp = value === true || value === 'true' || value === 1 || value === '1';
 
       if (isValidOtp) {
+        const partnerUUID = data?.partnerUUID
+          || data?.partnerUuid
+          || data?.partner?.partnerUUID
+          || data?.partner?.partnerUuid;
+        if (partnerUUID) await savePartnerProfileId(String(partnerUUID));
+
         const customToken = typeof data?.customToken === 'string' ? data.customToken.trim() : '';
         if (!customToken) {
           setErr('Authentication failed. Please try again.');

@@ -6,6 +6,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { pColors, pRadii, pSpacing, pType, inr } from '@/src/theme';
 import { partnerApi } from '@/src/api';
+import { ActivationGate } from '@/src/onboarding-guard';
 
 const TABS = [
   { k: 'pending', label: 'Requests' },
@@ -15,6 +16,10 @@ const TABS = [
 ] as const;
 
 export default function Jobs() {
+  return <ActivationGate><JobsContent /></ActivationGate>;
+}
+
+function JobsContent() {
   const router = useRouter();
   const [tab, setTab] = useState<'pending' | 'confirmed' | 'completed' | 'declined'>('pending');
   const [items, setItems] = useState<any[]>([]);

@@ -6,6 +6,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { pColors, pRadii, pSpacing, pType, inr, SERVICE_CATALOG, serviceRequiresCertificate } from '@/src/theme';
 import { authenticatedFetch, loadPartnerProfileId, partnerApi } from '@/src/api';
+import { ActivationGate } from '@/src/onboarding-guard';
 
 const BASE = 'http://localhost:8080/ws_glowmeout_partner_services';
 
@@ -16,6 +17,10 @@ const MODE_LABEL: Record<string, string> = {
 };
 
 export default function Services() {
+  return <ActivationGate><ServicesContent /></ActivationGate>;
+}
+
+function ServicesContent() {
   const router = useRouter();
   const [items, setItems] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
