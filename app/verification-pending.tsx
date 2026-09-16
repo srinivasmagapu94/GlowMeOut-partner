@@ -96,6 +96,17 @@ export default function VerificationPending() {
     router.replace('/landing');
   };
 
+  const validation = user?.validation;
+  const documentsValidated = validation?.isKYCValidated === true
+    && validation?.isBankDetailsValidated === true
+    && validation?.isCertificateValidated === true;
+  const timeline = [
+    { s: 'Application received', done: true, active: false },
+    { s: 'KYC & bank verification', done: documentsValidated, active: !documentsValidated },
+    { s: 'Team approval', done: false, active: documentsValidated },
+    ...(!documentsValidated ? [{ s: 'Ready to accept bookings', done: false, active: false }] : []),
+  ];
+
   return (
     <View style={styles.c} testID="verification-pending">
       <LinearGradient colors={[pColors.ink, '#20242A']} style={StyleSheet.absoluteFillObject} />
@@ -118,12 +129,7 @@ export default function VerificationPending() {
           </Animated.Text>
 
           <View style={styles.timeline}>
-            {[
-              { s: 'Application received', done: true, active: false },
-              { s: 'KYC & bank verification', done: false, active: true },
-              { s: 'Team approval', done: false, active: false },
-              { s: 'Ready to accept bookings', done: false, active: false },
-            ].map((t, i) => (
+            {timeline.map((t, i) => (
               <View key={i} style={styles.step}>
                 <View style={[styles.stepDot, t.done && styles.stepDone, t.active && styles.stepActive]}>
                   {t.done ? <Feather name="check" size={12} color={pColors.ink} /> : t.active ? <View style={styles.pulse} /> : null}

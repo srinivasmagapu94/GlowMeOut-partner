@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform, Alert, BackHandler, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TextInput, Pressable, ScrollView, KeyboardAvoidingView, Platform, BackHandler, ActivityIndicator } from 'react-native';
 import { Image } from 'expo-image';
 import * as DocumentPicker from 'expo-document-picker';
 import { Feather } from '@expo/vector-icons';
@@ -22,6 +22,8 @@ const isValidPan = (value: string) => /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/i.test(value);
 const normalizeAccountNumber = (value: string) => (value || '').replace(/[\s-]/g, '').trim();
 const isValidIfsc = (value: string) => /^[A-Z]{4}0[A-Z0-9]{6}$/i.test((value || '').trim().toUpperCase());
 const isValidBankAccountNumber = (value: string) => /^\d{9,18}$/.test(normalizeAccountNumber(value));
+const isImageDocument = (document: { name: string; type?: string }) =>
+  document.type?.startsWith('image/') || /\.(png|jpe?g)$/i.test(document.name);
 
 const buildMultipartFile = async (document: { name: string; uri: string; type?: string }) => {
   if (Platform.OS === 'web') {
@@ -44,6 +46,7 @@ export default function PartnerRegister() {
   const { step: requestedStep } = useLocalSearchParams<{ step?: string }>();
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState('');
 
   useFocusEffect(
     useCallback(() => {
@@ -152,6 +155,7 @@ export default function PartnerRegister() {
   const toggleService = (id: string) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
   const addCert = async () => {
+    setFormError('');
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg'],
@@ -166,7 +170,7 @@ export default function PartnerRegister() {
 
       const partnerUUID = await loadPartnerProfileId();
       if (!partnerUUID) {
-        Alert.alert('Profile not saved', 'Please save personal details before uploading a certificate.');
+        setFormError('Please save personal details before uploading a certificate.');
         return;
       }
 
@@ -194,7 +198,7 @@ export default function PartnerRegister() {
 
       if (!response.ok) {
         const errText = await response.text();
-        Alert.alert('Certificate upload failed', errText || 'Please try again.');
+        setFormError(errText || 'Certificate upload failed. Please try again.');
         return;
       }
 
@@ -209,9 +213,8 @@ export default function PartnerRegister() {
         issue_date: new Date().toISOString().slice(0, 10),
         comment: 'Uploaded by partner',
       }]);
-      Alert.alert('Success', 'Certificate uploaded successfully.');
     } catch (error: any) {
-      Alert.alert('Upload error', error?.message || 'Unable to upload certificate.');
+      setFormError(error?.message || 'Unable to upload certificate.');
     }
   };
 
@@ -282,9 +285,10 @@ export default function PartnerRegister() {
   };
 
   const uploadKYC = async () => {
+    setFormError('');
     const partnerUUID = await loadPartnerProfileId();
     if (!partnerUUID) {
-      Alert.alert('Profile not saved', 'Please save personal details before uploading KYC document.');
+      setFormError('Please save personal details before uploading the KYC document.');
       return;
     }
 
@@ -323,7 +327,7 @@ export default function PartnerRegister() {
 
       if (!response.ok) {
         const errText = await response.text();
-        Alert.alert('KYC document upload failed', errText || 'Please try again.');
+        setFormError(errText || 'KYC document upload failed. Please try again.');
         return;
       }
 
@@ -332,16 +336,16 @@ export default function PartnerRegister() {
         uri: asset.uri,
         type: asset.mimeType || 'application/pdf',
       });
-      Alert.alert('Success', 'KYC document uploaded successfully.');
     } catch (error: any) {
-      Alert.alert('Upload error', error?.message || 'Unable to upload KYC document.');
+      setFormError(error?.message || 'Unable to upload KYC document.');
     }
   };
 
   const uploadPassbook = async () => {
+    setFormError('');
     if (!bankFormValid) {
       setPassbookStatus('uploadDisabled');
-      Alert.alert('Incomplete bank details', 'Please complete all required bank details before uploading the passbook document.');
+      setFormError('Please complete all required bank details before uploading the passbook document.');
       return;
     }
 
@@ -367,7 +371,7 @@ export default function PartnerRegister() {
 
       if ((!allowedExt && !allowedMime) || !sizeOk) {
         setPassbookStatus('unreadable');
-        Alert.alert('Invalid passbook document', 'Please upload a clear PDF or image file up to 5 MB.');
+        setFormError('Please upload a clear PDF or image file up to 5 MB.');
         return;
       }
 
@@ -400,21 +404,21 @@ export default function PartnerRegister() {
 
       setPassbookDocument(passbookDocument);
       setPassbookStatus('uploadEnabled');
-      Alert.alert('Passbook uploaded', 'Your passbook document was uploaded successfully.');
     } catch (error: any) {
       setPassbookStatus('unreadable');
-      Alert.alert('Upload error', error?.message || 'Unable to process the passbook document.');
+      setFormError(error?.message || 'Unable to process the passbook document.');
     }
   };
 
   const validatePassbookDocument = async () => {
+    setFormError('');
     if (!bankFormValid) {
-      Alert.alert('Incomplete bank details', 'Please complete all required bank details before continuing.');
+      setFormError('Please complete all required bank details before continuing.');
       return false;
     }
 
     if (!passbookDocument) {
-      Alert.alert('Passbook required', 'Please upload the passbook front page before continuing.');
+      setFormError('Please upload the passbook front page before continuing.');
       return false;
     }
 
@@ -434,7 +438,7 @@ export default function PartnerRegister() {
       if (!res.ok) {
         const text = await res.text();
         setPassbookStatus('mismatch');
-        Alert.alert('Validation failed', text || 'Bank document validation failed.');
+        setFormError(text || 'Bank document validation failed.');
         return false;
       }
 
@@ -443,7 +447,7 @@ export default function PartnerRegister() {
 
       if (!isValid) {
         setPassbookStatus('mismatch');
-        Alert.alert('Account number mismatch', 'The account number entered does not match the account number on the uploaded passbook. Please check your details and upload the correct passbook page.');
+        setFormError('The account number entered does not match the uploaded passbook.');
         return false;
       }
 
@@ -451,7 +455,7 @@ export default function PartnerRegister() {
       return true;
     } catch (error: any) {
       setPassbookStatus('unreadable');
-      Alert.alert('Couldn\'t verify account number', 'We couldn\'t clearly read the account number from this document. Please upload a clear image of the passbook front page.');
+      setFormError('Could not read the account number. Please upload a clear image of the passbook front page.');
       return false;
     } finally {
       setSaving(false);
@@ -520,14 +524,15 @@ export default function PartnerRegister() {
         throw new Error(text || 'Submit for verification failed');
       }
 
-      await refreshOnboardingRoute();
+      router.replace('/verification-pending');
     } catch (e: any) {
       console.error(e);
-      alert(e.message || 'Failed to submit for verification');
+      setFormError(e.message || 'Failed to submit for verification');
     } finally { setSaving(false); }
   };
 
   const handlePrimaryAction = async () => {
+    setFormError('');
     if (step === 0) {
       try {
         setSaving(true);
@@ -537,7 +542,7 @@ export default function PartnerRegister() {
         setStep(1);
       } catch (e: any) {
         console.error(e);
-        alert(e.message || 'Unable to save profile');
+        setFormError(e.message || 'Unable to save profile');
       } finally {
         setSaving(false);
       }
@@ -551,7 +556,7 @@ export default function PartnerRegister() {
         setStep(2);
       } catch (e: any) {
         console.error(e);
-        alert(e.message || 'Unable to save services');
+        setFormError(e.message || 'Unable to save services');
       } finally {
         setSaving(false);
       }
@@ -566,11 +571,11 @@ export default function PartnerRegister() {
     if (step === 3) {
       const validKycNumber = kycType === 'aadhaar' ? isValidAadhaar(kycNumber) : isValidPan(kycNumber);
       if (!validKycNumber) {
-        Alert.alert('Invalid KYC', kycType === 'aadhaar' ? 'Enter a valid 12-digit Aadhaar number.' : 'Enter a valid 10-character PAN number.');
+        setFormError(kycType === 'aadhaar' ? 'Enter a valid 12-digit Aadhaar number.' : 'Enter a valid 10-character PAN number.');
         return;
       }
       if (!kycDocument) {
-        Alert.alert('KYC document required', 'Please upload your Aadhaar or PAN document before continuing.');
+        setFormError(`Please upload your ${kycType === 'aadhaar' ? 'Aadhaar' : 'PAN'} document before continuing.`);
         return;
       }
       try {
@@ -579,7 +584,7 @@ export default function PartnerRegister() {
         setStep(4);
       } catch (e: any) {
         console.error(e);
-        alert(e.message || 'Unable to save KYC');
+        setFormError(e.message || 'Unable to save KYC');
       } finally {
         setSaving(false);
       }
@@ -594,7 +599,7 @@ export default function PartnerRegister() {
         setStep(5);
       } catch (e: any) {
         console.error(e);
-        alert(e.message || 'Unable to save bank details');
+        setFormError(e.message || 'Unable to save bank details');
       }
       return;
     }
@@ -623,6 +628,12 @@ export default function PartnerRegister() {
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={{ padding: pSpacing.xl, paddingBottom: 140 }} keyboardShouldPersistTaps="handled">
+          {!!formError && (
+            <View style={styles.inlineError}>
+              <Feather name="alert-circle" size={16} color={pColors.error} />
+              <Text style={styles.inlineErrorText}>{formError}</Text>
+            </View>
+          )}
           {step === 0 && (
             <View style={{ gap: pSpacing.lg }}>
               <View style={{ alignItems: 'center' }}>
@@ -668,6 +679,7 @@ export default function PartnerRegister() {
                 <Text style={styles.uploadTitle}>Upload certificate</Text>
                 <Text style={styles.uploadSub}>{certificateFile ? certificateFile.name : 'PDF or image, up to 5 MB'}</Text>
               </Pressable>
+              {certificateFile && <UploadedDocument document={certificateFile} />}
 
               <Pressable style={styles.skipBtn} onPress={() => setStep(3)}>
                 <Text style={styles.skipBtnTxt}>Skip for now</Text>
@@ -709,6 +721,7 @@ export default function PartnerRegister() {
                 <Text style={styles.uploadTitle}>Upload {kycType === 'aadhaar' ? 'Aadhaar' : 'PAN'} document</Text>
                 <Text style={styles.uploadSub}>{kycDocument ? kycDocument.name : 'PDF or image, up to 5 MB'}</Text>
               </Pressable>
+              {kycDocument && <UploadedDocument document={kycDocument} />}
             </View>
           )}
 
@@ -763,10 +776,11 @@ export default function PartnerRegister() {
               {passbookStatus === 'unreadable' && (
                 <View style={styles.verificationError}>
                   <Feather name="alert-circle" size={16} color="#B42318" />
-                  <Text style={styles.verificationErrorText}>Couldn\'t verify account number</Text>
+                  <Text style={styles.verificationErrorText}>Could not verify account number</Text>
                 </View>
               )}
 
+              {passbookDocument && <UploadedDocument document={passbookDocument} />}
               <Field label="UPI ID (optional)" value={upi} onChange={setUpi} testID="upi" />
             </View>
           )}
@@ -833,6 +847,26 @@ function Field({ label, value, onChange, multi, kb, maxLen, testID }: any) {
     </View>
   );
 }
+
+function UploadedDocument({ document }: { document: { name: string; uri: string; type?: string } }) {
+  return (
+    <View style={styles.documentPreview}>
+      {isImageDocument(document) ? (
+        <Image source={{ uri: document.uri }} style={styles.documentImage} contentFit="cover" />
+      ) : (
+        <View style={styles.documentIcon}>
+          <Feather name="file-text" size={24} color={pColors.goldDeep} />
+        </View>
+      )}
+      <View style={{ flex: 1 }}>
+        <Text style={styles.documentTitle}>Uploaded document</Text>
+        <Text style={styles.documentName} numberOfLines={1}>{document.name}</Text>
+      </View>
+      <Feather name="check-circle" size={18} color="#1B7F5A" />
+    </View>
+  );
+}
+
 function ReviewSection({ title, children }: any) {
   return (
     <View style={styles.rev}>
@@ -855,6 +889,8 @@ const styles = StyleSheet.create({
   progressDot: { flex: 1, height: 3, borderRadius: 2, backgroundColor: pColors.border },
   progressDotActive: { backgroundColor: pColors.gold },
   helper: { color: pColors.inkMuted, ...pType.body, marginBottom: pSpacing.lg },
+  inlineError: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#FFF1F0', borderWidth: 1, borderColor: '#F3B4AE', borderRadius: pRadii.md, padding: pSpacing.md, marginBottom: pSpacing.lg },
+  inlineErrorText: { flex: 1, color: pColors.error, fontSize: 13, lineHeight: 18 },
   avatar: { width: 100, height: 100, borderRadius: 50, borderWidth: 3, borderColor: pColors.gold },
   twoCol: { flexDirection: 'row', gap: pSpacing.md, alignItems: 'flex-start' },
   col: { flex: 1, minWidth: 0 },
@@ -881,6 +917,11 @@ const styles = StyleSheet.create({
   uploadDisabled: { opacity: 0.5, backgroundColor: pColors.surfaceMuted },
   uploadTitle: { color: pColors.ink, fontWeight: '600', marginTop: 6 },
   uploadSub: { color: pColors.inkMuted, fontSize: 12 },
+  documentPreview: { flexDirection: 'row', alignItems: 'center', gap: pSpacing.md, backgroundColor: pColors.surface, borderWidth: 1, borderColor: pColors.border, borderRadius: pRadii.md, padding: pSpacing.md },
+  documentImage: { width: 58, height: 58, borderRadius: pRadii.sm },
+  documentIcon: { width: 58, height: 58, borderRadius: pRadii.sm, backgroundColor: pColors.goldSoft, alignItems: 'center', justifyContent: 'center' },
+  documentTitle: { color: pColors.ink, fontWeight: '700', fontSize: 13 },
+  documentName: { color: pColors.inkMuted, fontSize: 12, marginTop: 3 },
   uploadHint: { color: pColors.goldDeep, fontSize: 16, fontWeight: '800', marginBottom: 2 },
   optionalHint: { color: pColors.inkMuted, fontSize: 13, lineHeight: 18 },
   skipBtn: { paddingVertical: 12, borderRadius: pRadii.pill, borderWidth: 1, borderColor: pColors.border, backgroundColor: pColors.surface, alignItems: 'center' },

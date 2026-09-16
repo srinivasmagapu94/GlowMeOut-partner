@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { pColors, pRadii, pSpacing, pType, SERVICE_CATALOG } from '@/src/theme';
-import { partnerApi } from '@/src/api';
+import { authenticatedFetch, loadPartnerProfileId, partnerApi } from '@/src/api';
 import { ActivationGate } from '@/src/onboarding-guard';
 
 const MODES = [
@@ -64,17 +64,62 @@ function ServiceEditorContent() {
   const save = async () => {
     setSaving(true);
     try {
-      const payload: any = {
-        category, name, description, pricing_mode: mode,
-        duration_min: parseInt(duration) || 60,
-      };
-      if (mode === 'fixed') payload.fixed_price = parseInt(fixedPrice);
-      if (mode === 'custom') payload.custom_starting_price = parseInt(startingPrice);
-      if (mode === 'package') payload.packages = packages
-        .filter((p) => parseInt(p.price))
-        .map((p) => ({ ...p, price: parseInt(p.price), duration_min: parseInt(p.duration_min) || 60 }));
-      if (editing) await partnerApi(`/partner/services/${id}`, { method: 'PATCH', body: JSON.stringify(payload) });
-      else await partnerApi('/partner/services', { method: 'POST', body: JSON.stringify(payload) });
+      if (editing) {
+        const payload: any = {
+          category, name, description, pricing_mode: mode,
+          duration_min: parseInt(duration) || 60,
+        };
+        if (mode === 'fixed') payload.fixed_price = parseInt(fixedPrice);
+        if (mode === 'custom') payload.custom_starting_price = parseInt(startingPrice);
+        if (mode === 'package') payload.packages = packages
+          .filter((p) => parseInt(p.price))
+          .map((p) => ({ ...p, price: parseInt(p.price), duration_min: parseInt(p.duration_min) || 60 }));
+        await partnerApi(`/partner/services/${id}`, { method: 'PATCH', body: JSON.stringify(payload) });
+      } else {
+        const partnerUUID = await loadPartnerProfileId();
+        if (!partnerUUID) throw new Error('Partner profile ID not found.');
+
+        const pricingModel = {
+          fixedPrice: mode === 'fixed'
+            ? { price: fixedPrice.trim(), duration: duration.trim() }
+            : null,
+          packages: mode === 'package'
+            ? packages
+              .filter((p) => p.price.trim())
+              .map((p) => ({
+                packageType: p.name,
+                packagePrice: p.price.trim(),
+                packageDuration: p.duration_min.trim(),
+                packageDescription: p.description.trim(),
+                includedServices: p.included_services.trim(),
+                equipmentIncluded: p.equipment_included.trim(),
+              }))
+            : [],
+          customQuote: mode === 'custom'
+            ? { startingPrice: startingPrice.trim() }
+            : null,
+        };
+
+        const response = await authenticatedFetch(
+          `${process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:8080/ws_glowmeout_partner_services'}/partner/createPartnerServices`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              partnerUUID,
+              serviceType: category,
+              serviceName: name.trim(),
+              serviceDescription: description.trim(),
+              pricingModel,
+            }),
+          },
+        );
+
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || 'Service creation failed');
+        }
+      }
       router.back();
     } finally { setSaving(false); }
   };
