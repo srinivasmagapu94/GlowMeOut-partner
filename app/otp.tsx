@@ -1,0 +1,217 @@
+﻿import { View, Text, StyleSheet, TextInput, Pressable, KeyboardAvoidingView, Platform } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Feather } from '@expo/vector-icons';
+import { pColors, pRadii, pSpacing, pType } from '@/src/theme';
+import { normalizePartnerMobileNumber, savePartnerProfileId } from '@/src/api';
+import { signInToFirebase } from '@/src/auth';
+
+const BASE = 'http://localhost:8080/ws_glowmeout_partner_services';
+
+export default function PartnerOtp() {
+  const { phone } = useLocalSearchParams<{ phone: string }>();
+  const normalizedPhone = normalizePartnerMobileNumber(Array.isArray(phone) ? phone[0] : phone || '');
+  const router = useRouter();
+  const [digits, setDigits] = useState(['', '', '', '', '', '']);
+  const refs = useRef<(TextInput | null)[]>([]);
+  const verifyRequestId = useRef(0);
+  const pendingVerifyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+  const [seconds, setSeconds] = useState(30);
+
+  useEffect(() => {
+    const t = setInterval(() => setSeconds((s) => (s > 0 ? s - 1 : 0)), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const set = (i: number, v: string) => {
+    if (pendingVerifyTimeoutRef.current) {
+      clearTimeout(pendingVerifyTimeoutRef.current);
+      pendingVerifyTimeoutRef.current = null;
+    }
+
+    const val = v.replace(/\D/g, '').slice(0, 1);
+    setErr('');
+    setDigits((prev) => {
+      const next = [...prev];
+      next[i] = val;
+      if (val && i < 5) refs.current[i + 1]?.focus();
+      if (next.every((d) => d) && next.join('').length === 6) {
+        const otp = next.join('');
+        const requestId = ++verifyRequestId.current;
+        pendingVerifyTimeoutRef.current = setTimeout(() => verify(otp, requestId), 0);
+      }
+      return next;
+    });
+  };
+
+  const verify = async (code?: string, requestId?: number) => {
+    setErr('');
+    const otp = code || digits.join('');
+    if (otp.length !== 6) return setErr('Enter the 6-digit code');
+
+    const currentRequestId = requestId ?? ++verifyRequestId.current;
+    try {
+      setLoading(true);
+      const res = await fetch(`${BASE}/partner/verifyOTP`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mobileNumber: normalizedPhone, otp }),
+      });
+
+      if (requestId !== undefined && currentRequestId !== verifyRequestId.current) {
+        return;
+      }
+
+      let data: any = null;
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        try {
+          data = await res.json();
+        } catch {
+          const text = await res.text();
+          data = text ? { message: text } : null;
+        }
+      } else {
+        const text = await res.text();
+        data = text ? { message: text } : null;
+      }
+
+      if (requestId !== undefined && currentRequestId !== verifyRequestId.current) {
+        return;
+      }
+
+      if (!res.ok) {
+        setDigits(['', '', '', '', '', '']);
+        refs.current[0]?.focus();
+        setErr(res.status === 400 ? 'Invalid OTP' : 'Unable to verify OTP. Please try again.');
+        return;
+      }
+
+      const value = data?.isValidOTP ?? data?.validOTP ?? data?.isValid;
+      const isValidOtp = value === true || value === 'true' || value === 1 || value === '1';
+
+      if (isValidOtp) {
+        const partnerUUID = data?.partnerUUID
+          || data?.partnerUuid
+          || data?.partner?.partnerUUID
+          || data?.partner?.partnerUuid;
+        if (partnerUUID) await savePartnerProfileId(String(partnerUUID));
+
+        const customToken = typeof data?.customToken === 'string' ? data.customToken.trim() : '';
+        if (!customToken) {
+          setErr('Authentication failed. Please try again.');
+          return;
+        }
+
+        try {
+          const credential = await signInToFirebase(customToken);
+          if (!credential.user) {
+            setErr('Authentication failed. Please try again.');
+            return;
+          }
+
+          await credential.user.getIdToken();
+        } catch {
+          setErr('Authentication failed. Please try again.');
+          return;
+        }
+
+        if (pendingVerifyTimeoutRef.current) {
+          clearTimeout(pendingVerifyTimeoutRef.current);
+          pendingVerifyTimeoutRef.current = null;
+        }
+        router.replace('/register');
+        return;
+      }
+
+      setDigits(['', '', '', '', '', '']);
+      refs.current[0]?.focus();
+      setErr('Invalid OTP');
+    } catch {
+      if (requestId !== undefined && currentRequestId !== verifyRequestId.current) {
+        return;
+      }
+      setDigits(['', '', '', '', '', '']);
+      refs.current[0]?.focus();
+      setErr('Unable to verify OTP. Check your connection and try again.');
+    } finally {
+      if (pendingVerifyTimeoutRef.current) {
+        clearTimeout(pendingVerifyTimeoutRef.current);
+        pendingVerifyTimeoutRef.current = null;
+      }
+      if (requestId === undefined || currentRequestId === verifyRequestId.current) {
+        setLoading(false);
+      }
+    }
+  };
+
+  const resend = async () => {
+    if (seconds > 0) return;
+    try {
+      setSeconds(30);
+      const res = await fetch(`${BASE}/partner/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mobileNumber: normalizedPhone }),
+      });
+      if (!res.ok) throw new Error('Unable to resend OTP');
+    } catch {
+      setSeconds(0);
+      setErr('Unable to resend OTP. Please try again.');
+    }
+  };
+
+  return (
+    <SafeAreaView style={styles.c} testID="partner-otp">
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+        <Pressable onPress={() => router.replace('/login')} style={styles.back}><Feather name="arrow-left" size={22} color={pColors.ink} /></Pressable>
+        <View style={{ paddingHorizontal: pSpacing.xl }}>
+          <Text style={styles.h1}>Verify OTP</Text>
+          <Text style={styles.sub}>We sent a 6-digit code to <Text style={{ fontWeight: '700' }}>{normalizedPhone || phone}</Text></Text>.
+          <View style={styles.row}>
+            {digits.map((d, i) => (
+              <TextInput
+                key={i}
+                testID={`partner-otp-${i}`}
+                ref={(r) => { refs.current[i] = r; }}
+                value={d}
+                onChangeText={(v) => set(i, v)}
+                onKeyPress={({ nativeEvent }) => { if (nativeEvent.key === 'Backspace' && !digits[i] && i > 0) refs.current[i - 1]?.focus(); }}
+                keyboardType="number-pad"
+                maxLength={1}
+                style={[styles.box, d && styles.boxFilled]}
+              />
+            ))}
+          </View>
+          {!!err && <Text style={styles.err}>{err}</Text>}
+          <Pressable onPress={resend} style={{ marginTop: pSpacing.xl }}>
+            <Text style={styles.resend}>{seconds > 0 ? `Resend in ${seconds}s` : 'Resend code'}</Text>
+          </Pressable>
+        </View>
+        <View style={styles.footer}>
+          <Pressable style={[styles.cta, loading && { opacity: 0.6 }]} disabled={loading} onPress={() => verify()} testID="partner-verify-btn">
+            <Text style={styles.ctaTxt}>{loading ? 'Verifying…' : 'Verify & continue'}</Text>
+          </Pressable>
+        </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  c: { flex: 1, backgroundColor: pColors.bg },
+  back: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', margin: pSpacing.md },
+  h1: { ...pType.display, color: pColors.ink },
+  sub: { color: pColors.inkMuted, marginTop: pSpacing.md, ...pType.body },
+  row: { flexDirection: 'row', gap: 8, marginTop: pSpacing.xxl, justifyContent: 'center' },
+  box: { width: 48, height: 60, borderRadius: pRadii.md, borderWidth: 1, borderColor: pColors.border, backgroundColor: pColors.surface, textAlign: 'center', fontSize: 24, fontWeight: '700', color: pColors.ink },
+  boxFilled: { borderColor: pColors.gold, backgroundColor: '#FFFDF6' },
+  err: { color: pColors.error, marginTop: pSpacing.md, fontSize: 13 },
+  resend: { color: pColors.goldDeep, fontWeight: '700', fontSize: 14 },
+  footer: { marginTop: 'auto', padding: pSpacing.xl, paddingTop: pSpacing.md },
+  cta: { backgroundColor: pColors.ink, borderRadius: pRadii.pill, paddingVertical: 18, alignItems: 'center' },
+  ctaTxt: { color: pColors.gold, fontWeight: '700', fontSize: 16, letterSpacing: 0.5 },
+});
