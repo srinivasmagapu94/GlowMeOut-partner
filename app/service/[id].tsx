@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, ScrollView, TextInput, Pressable, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TextInput, Pressable, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -15,6 +15,7 @@ const MODES = [
 
 // Some categories only allow a single fixed price (no packages / custom quote).
 const FIXED_ONLY_CATEGORIES = new Set(['saree']);
+const BASE = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:8080/ws_glowmeout_partner_services';
 
 export default function ServiceEditor() {
   return <ActivationGate><ServiceEditorContent /></ActivationGate>;
@@ -41,14 +42,56 @@ function ServiceEditorContent() {
   useEffect(() => {
     if (!editing) return;
     (async () => {
-      const items = await partnerApi('/partner/services');
-      const s = items.find((x: any) => x.id === id);
-      if (s) {
-        setMode(s.pricing_mode); setCategory(s.category); setName(s.name);
-        setDescription(s.description || ''); setDuration(String(s.duration_min || 60));
-        if (s.fixed_price) setFixedPrice(String(s.fixed_price));
-        if (s.custom_starting_price) setStartingPrice(String(s.custom_starting_price));
-        if (s.packages) setPackages(s.packages.map((p: any) => ({ ...p, price: String(p.price || ''), duration_min: String(p.duration_min || 60) })));
+      // Prefer fetching the single service by UUID from backend for freshest data
+      try {
+        const res = await authenticatedFetch(`${BASE}/partner/fetchActivePartnerServiceByServiceUUID/${encodeURIComponent(String(id))}`);
+        if (res.ok) {
+          const s = await res.json();
+          const pricingModel = s.pricingModel || {};
+          const packagesArr = Array.isArray(pricingModel.packages) ? pricingModel.packages : [];
+          const pricingMode = pricingModel.fixedPrice
+            ? 'fixed'
+            : packagesArr.length
+              ? 'package'
+              : pricingModel.customQuote
+                ? 'custom'
+                : 'fixed';
+
+          setMode(pricingMode);
+          setCategory(s.serviceType || '');
+          setName(s.serviceName || '');
+          setDescription(s.serviceDescription || '');
+          setDuration(String(pricingModel.fixedPrice?.duration || packagesArr[0]?.packageDuration || 60));
+          if (pricingModel.fixedPrice) setFixedPrice(String(pricingModel.fixedPrice.price || ''));
+          if (pricingModel.customQuote) setStartingPrice(String(pricingModel.customQuote.startingPrice || ''));
+          if (packagesArr.length) {
+            setPackages(packagesArr.map((p: any) => ({
+              name: p.packageType,
+              price: String(p.packagePrice || ''),
+              description: p.packageDescription || '',
+              included_services: p.includedServices || '',
+              duration_min: String(p.packageDuration || 60),
+              equipment_included: p.equipmentIncluded || '',
+            })));
+          }
+          return;
+        }
+      } catch (err) {
+        // ignore and fallback to earlier approach
+      }
+
+      try {
+        const items = await partnerApi('/partner/services');
+        const s = items.find((x: any) => x.id === id);
+        if (s) {
+          setMode(s.pricing_mode); setCategory(s.category); setName(s.name);
+          setDescription(s.description || ''); setDuration(String(s.duration_min || 60));
+          if (s.fixed_price) setFixedPrice(String(s.fixed_price));
+          if (s.custom_starting_price) setStartingPrice(String(s.custom_starting_price));
+          if (s.packages) setPackages(s.packages.map((p: any) => ({ ...p, price: String(p.price || ''), duration_min: String(p.duration_min || 60) })));
+        }
+      } catch {
+        // ignore
       }
     })();
   }, [id]);
@@ -65,15 +108,30 @@ function ServiceEditorContent() {
     setSaving(true);
     try {
       if (editing) {
-        const payload: any = {
-          category, name, description, pricing_mode: mode,
-          duration_min: parseInt(duration) || 60,
+        const pricingModel: any = {
+          fixedPrice: mode === 'fixed' ? { price: String(fixedPrice).trim(), duration: String(duration).trim() } : null,
+          packages: mode === 'package'
+            ? packages
+              .filter((p) => p.price.trim())
+              .map((p) => ({
+                packageType: p.name,
+                packagePrice: p.price.trim(),
+                packageDuration: p.duration_min.trim(),
+                packageDescription: p.description.trim(),
+                includedServices: p.included_services.trim(),
+                equipmentIncluded: p.equipment_included.trim(),
+              }))
+            : [],
+          customQuote: mode === 'custom' ? { startingPrice: startingPrice.trim() } : null,
         };
-        if (mode === 'fixed') payload.fixed_price = parseInt(fixedPrice);
-        if (mode === 'custom') payload.custom_starting_price = parseInt(startingPrice);
-        if (mode === 'package') payload.packages = packages
-          .filter((p) => parseInt(p.price))
-          .map((p) => ({ ...p, price: parseInt(p.price), duration_min: parseInt(p.duration_min) || 60 }));
+
+        const payload: any = {
+          serviceType: category,
+          serviceName: name.trim(),
+          serviceDescription: description.trim(),
+          pricingModel,
+        };
+
         await partnerApi(`/partner/services/${id}`, { method: 'PATCH', body: JSON.stringify(payload) });
       } else {
         const partnerUUID = await loadPartnerProfileId();
@@ -101,7 +159,7 @@ function ServiceEditorContent() {
         };
 
         const response = await authenticatedFetch(
-          `${process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:8080/ws_glowmeout_partner_services'}/partner/createPartnerServices`,
+          `${BASE}/partner/createPartnerServices`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -119,15 +177,29 @@ function ServiceEditorContent() {
           const text = await response.text();
           throw new Error(text || 'Service creation failed');
         }
+
+        const servicesResponse = await authenticatedFetch(`${BASE}/partner/fetchActivePartnerServices`);
+        if (!servicesResponse.ok) {
+          const text = await servicesResponse.text();
+          throw new Error(text || 'Unable to refresh services');
+        }
       }
-      router.back();
+      router.replace('/(tabs)/services');
     } finally { setSaving(false); }
   };
 
   const del = async () => {
     if (!editing) return;
-    await partnerApi(`/partner/services/${id}`, { method: 'DELETE' });
-    router.back();
+    try {
+      const res = await authenticatedFetch(`${BASE}/partner/deactivatePartnerService/${encodeURIComponent(String(id))}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `HTTP ${res.status}`);
+      }
+      router.back();
+    } catch (error: any) {
+      Alert.alert('Delete failed', error?.message || 'Unable to delete service.');
+    }
   };
 
   return (

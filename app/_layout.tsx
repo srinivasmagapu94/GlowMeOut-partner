@@ -6,6 +6,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { useIconFonts } from "@/src/hooks/use-icon-fonts";
+import { ChefNotificationsListener } from "@/src/hooks/use-chef-notifications";
 import { pColors } from '@/src/theme';
 import { AuthProvider } from '@/src/auth-context';
 
@@ -23,6 +24,7 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <AuthProvider>
+          <ChefNotificationsListener />
           <StatusBar barStyle="light-content" backgroundColor={pColors.ink} />
           <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: pColors.bg } }} />
         </AuthProvider>

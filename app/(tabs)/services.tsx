@@ -8,7 +8,7 @@ import { pColors, pRadii, pSpacing, pType, inr, SERVICE_CATALOG, serviceRequires
 import { authenticatedFetch, loadPartnerProfileId, partnerApi } from '@/src/api';
 import { ActivationGate } from '@/src/onboarding-guard';
 
-const BASE = 'http://localhost:8080/ws_glowmeout_partner_services';
+const BASE = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:8080/ws_glowmeout_partner_services';
 
 const MODE_LABEL: Record<string, string> = {
   fixed: 'Fixed price',
@@ -28,20 +28,64 @@ function ServicesContent() {
   const [dialogVisible, setDialogVisible] = useState(false);
   const [selectedLockedService, setSelectedLockedService] = useState<any | null>(null);
 
+  const fetchActiveServices = useCallback(async () => {
+    const response = await authenticatedFetch(`${BASE}/partner/fetchActivePartnerServices`);
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || 'Unable to load services');
+    }
+
+    const data = await response.json();
+    const services = Array.isArray(data?.partnerServices) ? data.partnerServices : [];
+    return services.map((service: any) => {
+      const pricingModel = service.pricingModel || {};
+      const packages = Array.isArray(pricingModel.packages) ? pricingModel.packages : [];
+      const pricingMode = pricingModel.fixedPrice
+        ? 'fixed'
+        : packages.length
+          ? 'package'
+          : pricingModel.customQuote
+            ? 'custom'
+            : 'fixed';
+      const duration = pricingModel.fixedPrice?.duration
+        || packages[0]?.packageDuration
+        || '60';
+
+      return {
+        id: service.serviceUUID,
+        category: service.serviceType,
+        name: service.serviceName,
+        description: service.serviceDescription || '',
+        pricing_mode: pricingMode,
+        duration_min: Number.parseInt(String(duration), 10) || 60,
+        fixed_price: Number(pricingModel.fixedPrice?.price) || 0,
+        custom_starting_price: Number(pricingModel.customQuote?.startingPrice) || 0,
+        packages: packages.map((item: any) => ({
+          name: item.packageType,
+          price: Number(item.packagePrice) || 0,
+          duration_min: Number(item.packageDuration) || 60,
+          description: item.packageDescription || '',
+          included_services: item.includedServices || '',
+          equipment_included: item.equipmentIncluded || '',
+        })),
+      };
+    });
+  }, []);
+
   const load = useCallback(async () => {
     try {
       const [services, profile] = await Promise.all([
-        partnerApi('/partner/services'),
+        fetchActiveServices(),
         partnerApi('/partner/me').catch(() => null),
       ]);
-      setItems(Array.isArray(services) ? services : []);
+      setItems(services);
       const status = (profile?.partner?.certificate_status || profile?.partner?.certificateStatus || 'not_uploaded').toLowerCase();
       setCertificateStatus(status);
     } catch {
       setItems([]);
       setCertificateStatus('not_uploaded');
     }
-  }, []);
+  }, [fetchActiveServices]);
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const isApproved = certificateStatus === 'approved';

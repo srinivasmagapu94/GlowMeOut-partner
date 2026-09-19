@@ -167,7 +167,7 @@ export default function PartnerOtp() {
   return (
     <SafeAreaView style={styles.c} testID="partner-otp">
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-        <Pressable onPress={() => router.back()} style={styles.back}><Feather name="arrow-left" size={22} color={pColors.ink} /></Pressable>
+        <Pressable onPress={() => router.replace('/login')} style={styles.back}><Feather name="arrow-left" size={22} color={pColors.ink} /></Pressable>
         <View style={{ paddingHorizontal: pSpacing.xl }}>
           <Text style={styles.h1}>Verify OTP</Text>
           <Text style={styles.sub}>We sent a 6-digit code to <Text style={{ fontWeight: '700' }}>{normalizedPhone || phone}</Text></Text>.
